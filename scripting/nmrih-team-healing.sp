@@ -2,6 +2,7 @@
  * - Better cooldown system, differentiate between graceful cancels and rejections
  * - Prevent healing when zombies are too nearby
  * - Group up all "Do X for medical" functions into a struct
+ * - Restore old progress bar in case of overlap
 */
 
 
@@ -297,11 +298,16 @@ public void OnPluginStart()
 	healCookie = RegClientCookie("disable_team_heal", "Disable team healing", CookieAccess_Public);
 	healCookie.SetPrefabMenu(CookieMenu_YesNo, "Disable team healing");
 
-	medkitTime = CreateConVar("sm_team_heal_medkit_time", "8.1");
-	bandageTime = CreateConVar("sm_team_heal_bandage_time", "2.8");
-	healCooldown = CreateConVar("sm_team_heal_cooldown", "5.0");
-	useDistance = CreateConVar("sm_team_heal_max_use_distance", "50.0");
-	thinkInterval = CreateConVar("sm_team_heal_think_interval", "0.1");
+	medkitTime = CreateConVar("sm_team_heal_first_aid_time", "8.1", 
+					"Seconds it takes for the first aid kit to heal a teammate");
+	bandageTime = CreateConVar("sm_team_heal_bandage_time", "2.8",
+					"Seconds it takes for bandages to heal a teammate");
+	healCooldown = CreateConVar("sm_team_heal_cooldown", "5.0",
+					"Cooldown period after a failed team heal attempt");
+	useDistance = CreateConVar("sm_team_heal_max_use_distance", "50.0",
+					"Maximum use range for medical items");
+	thinkInterval = CreateConVar("sm_team_heal_think_interval", "0.1",
+					"How often the healing progress thinks. Don't touch this unless you know what you're doing");
 
 	medkitAmt = FindConVar("sv_first_aid_heal_amt");
 	bandageAmt = FindConVar("sv_bandage_heal_amt");
