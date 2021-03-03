@@ -1,0 +1,30 @@
+"Phrases"
+{
+	"Healing"
+	{
+		"#format" 	"{1:N}"
+		"en"		"Healing {1}"
+	}
+
+	"Can't Heal Cooldown"
+	{
+		"#format" 	"{1:d}"
+		"en"		"Cooldown, try again in {1} second(s)"
+	}
+
+	"Can't Heal Healthy"
+	{
+		"en"		"Target is healthy"
+	}
+
+	"Can't Heal Clientprefs"
+	{
+		"en"		"Target has disabled healing in their settings"
+	}
+
+	"Being Healed"
+	{
+		"#format" 	"{1:N}"
+		"en"		"Being healed by {1}.\nCrouch to cancel"
+	}
+}
