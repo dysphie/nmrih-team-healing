@@ -499,7 +499,6 @@ HealRequestResult CanPlayerReceiveMedical(int client, Medical medical)
 {
 	if (AreClientCookiesCached(client))
 	{
-		// Get cookie and add 1 to it
 		char c[2];
 		healCookie.Get(client, c, sizeof(c));
 		if (c[0] == '1')
