@@ -1,6 +1,5 @@
 /* TODO:
  * - Better cooldown system, differentiate between graceful cancels and rejections
- * - Prevent healing when zombies are too nearby
  * - Group up all "Do X for medical" functions into a struct
  * - Restore old progress bar in case of overlap
 */
@@ -20,7 +19,7 @@ public Plugin myinfo = {
     name        = "[NMRiH] Team Healing",
     author      = "Dysphie",
     description = "Allow use of first aid kits and bandages on teammates",
-    version     = "1.0.0",
+    version     = "1.0.2",
     url         = ""
 };
 
@@ -263,6 +262,7 @@ enum struct HealingUse
 	void Init(int client)
 	{
 		this.client = client;
+		this.canTryHealTime = -1.0;
 		this.Reset();
 	}
 
@@ -296,7 +296,7 @@ public void OnPluginStart()
 	LoadTranslations("team-healing.phrases");
 
 	healCookie = RegClientCookie("disable_team_heal", "Disable team healing", CookieAccess_Public);
-	healCookie.SetPrefabMenu(CookieMenu_YesNo, "Disable team healing");
+	healCookie.SetPrefabMenu(CookieMenu_YesNo_Int, "Disable team healing");
 
 	medkitTime = CreateConVar("sm_team_heal_first_aid_time", "8.1", 
 					"Seconds it takes for the first aid kit to heal a teammate");
@@ -313,7 +313,8 @@ public void OnPluginStart()
 	bandageAmt = FindConVar("sv_bandage_heal_amt");
 
 	for (int i = 1; i <= MaxClients; i++)
-		healing[i].Init(i);
+		if (IsClientInGame(i))
+			OnClientConnected(i);
 
 	SoundMap medkitSnd;
 	medkitSnd.Init();
@@ -363,6 +364,12 @@ void EmitMedicalSound(int client, const char[] game_sound)
 	EmitSoundToAll(sound_name, client, channel, sound_level, SND_CHANGEVOL | SND_CHANGEPITCH, volume, pitch);
 }
 
+public void OnClientConnected(int client)
+{
+	healing[client].Init(client);
+	healer[client] = -1;
+}
+
 public void OnClientDisconnect(int client)
 {
 	if (healing[client].IsActive())
@@ -410,10 +417,10 @@ public void OnPlayerRunCmdPost(int client, int buttons, int impulse, const float
 
 	// Someone rejected our heal and we are on cooldown
 
-	int canHealIn = RoundToCeil(healing[client].canTryHealTime - curTime);
+	float canHealIn = healing[client].canTryHealTime - curTime;
 	if (canHealIn > 0)
 	{
-		PrintCenterText(client, "%t", "Can't Heal Cooldown", canHealIn);
+		PrintCenterText(client, "%t", "Can't Heal Cooldown", RoundToCeil(canHealIn));
 		return;
 	}
 
@@ -494,10 +501,8 @@ HealRequestResult CanPlayerReceiveMedical(int client, Medical medical)
 	{
 		// Get cookie and add 1 to it
 		char c[2];
-		GetClientCookie(client, healCookie, c, sizeof(c));
-
-		int value = StringToInt(c);
-		if (value != 0)
+		healCookie.Get(client, c, sizeof(c));
+		if (c[0] == '1')
 			return Heal_Refuse;
 	}
 
