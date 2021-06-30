@@ -59,7 +59,6 @@ enum struct SoundMap
 }
 
 SoundMap sfx[2];
-int healer[MAXPLAYERS_NMRIH+1] = {-1, ...};
 
 enum MedicalSequence
 {
@@ -100,14 +99,16 @@ enum struct HealingUse
 
 	void Start(int target, Medical medical)
 	{
+		if (target == -1)
+			return;
+
+		this.target = target;
 		this.duration = GetMedicalDuration(medical);
 		if (this.duration == -1)
 			return;
 
-		this.target = target;
 		this.medical = medical;
 		this.startTime = GetGameTime();
-		healer[target] = this.client;
 
 		// GetClientAbsAngles(this.client, this.startAngles);
 
@@ -136,16 +137,7 @@ enum struct HealingUse
 			return;
 		}
 
-		// Player rotated too much
-		// float angles[3];
-		// GetClientAbsAngles(this.client, angles);
-		// if (GetDifferenceBetweenAngles(angles, this.startAngles) > 90.0)
-		// {
-		// 	this.Stop();
-		// 	return;
-		// }
-
-		if (!(GetClientButtons(this.client) & IN_USE))
+		if (GetClientButtons(this.target) & IN_DUCK || !(GetClientButtons(this.client) & IN_USE))
 		{
 			this.Stop();
 			return;
@@ -234,30 +226,27 @@ enum struct HealingUse
 		if (!this.IsActive())
 			return;
 
-		healer[this.target] = -1;
 		this.think = null;
 
-		// Stop 
-		PrintCenterText(this.client, "");
-		PrintCenterText(this.client, "");
+		if (this.client != -1)
+			this.RemoveEffects(this.client, success);
 
-		UnfreezePlayer(this.client);
-		UnfreezePlayer(this.target);
-
-		// If we didn't make it the whole way we need to
-		// cancel the progress bars
-		if (!success)
-		{	
-			HideProgressBar(this.client);
-			HideProgressBar(this.target);	
-		}
-
-		// ExitThirdPerson(this.client);
-		// ExitThirdPerson(this.target);
+		if (this.target != -1)
+			this.RemoveEffects(this.target, success);
 
 		this.canTryHealTime = GetGameTime() + healCooldown.FloatValue;
 
 		this.Reset();
+	}
+
+	void RemoveEffects(int client, bool success = false)
+	{
+		// ExitThirdPerson(client);
+		PrintCenterText(client, "");
+		UnfreezePlayer(client);
+
+		if (!success)
+			HideProgressBar(client);
 	}
 
 	void Init(int client)
@@ -284,7 +273,7 @@ HealingUse healing[MAXPLAYERS_NMRIH+1];
 // But it's currently needed to access the healing struct
 public Action _ThinkHelper(Handle timer, int index)
 {
-	if (!IsClientInGame(index) || !healing[index].IsActive())
+	if (!healing[index].IsActive())
 		return Plugin_Stop;
 
 	healing[index].UseThink();
@@ -351,6 +340,8 @@ public void OnPluginStart()
 
 	sfx[Medical_FirstAidKit] = medkitSnd;
 	sfx[Medical_Bandages] = bandageSnd;
+
+	AutoExecConfig();
 }
 
 void EmitMedicalSound(int client, const char[] game_sound)
@@ -370,21 +361,29 @@ void EmitMedicalSound(int client, const char[] game_sound)
 public void OnClientConnected(int client)
 {
 	healing[client].Init(client);
-	healer[client] = -1;
 }
 
 public void OnClientDisconnect(int client)
 {
 	if (healing[client].IsActive())
+	{
+		healing[client].client = -1;
 		healing[client].Stop();
+	}
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i) && healing[i].target == client)
+		{
+			healing[i].target = -1;
+			healing[i].Stop();
+		}
+	}
 }
 
 public void OnPlayerRunCmdPost(int client, int buttons, int impulse, const float vel[3], 
 	const float angles[3], int weapon, int subtype, int cmdnum, int tickcount, int seed, const int mouse[2])
 {
-	if (buttons & IN_DUCK && healer[client] != -1)
-		healing[healer[client]].Stop();
-
 	// Can't start heal if we are already healing
 	if (healing[client].IsActive())
 		return;
@@ -412,7 +411,6 @@ public void OnPlayerRunCmdPost(int client, int buttons, int impulse, const float
 	{
 		if (canHeal == Heal_Refuse)
 			PrintCenterText(client, "%t", "Can't Heal Clientprefs");
-
 		return;
 	}
 
@@ -428,6 +426,7 @@ public void OnPlayerRunCmdPost(int client, int buttons, int impulse, const float
 	}
 
 	// Okay we can heal
+	PrintToServer("Start");
 	healing[client].Start(target, medical);
 }
 
