@@ -279,9 +279,11 @@ enum struct HealingUse
 
 HealingUse healing[MAXPLAYERS_NMRIH+1];
 
+// TODO: Bad practice to pass indexes to async fns.
+// But it's currently needed to access the healing struct
 public Action _ThinkHelper(Handle timer, int index)
 {
-	if (!healing[index].IsActive())
+	if (!IsClientInGame(index) || !healing[index].IsActive())
 		return Plugin_Stop;
 
 	healing[index].UseThink();
