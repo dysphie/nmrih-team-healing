@@ -2,6 +2,8 @@
 
 Allows survivors to heal each other.
 
+![image](https://user-images.githubusercontent.com/11559683/123883869-44b7a900-d920-11eb-821e-a109f5c0f3d0.png)
+
 To heal another survivor, hold USE (Default: E) on them while wielding a medkit or bandages.
 
 Healing other players is quicker than self healing by default. Players can break out of healing by crouching.
