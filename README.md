@@ -5,7 +5,9 @@ Allows survivors to heal each other.
 To heal another survivor, hold USE (Default: E) on them while wielding a medkit or bandages.
 
 Healing other players is quicker than self healing by default. Players can break out of healing by crouching.
+
 It's also possible to opt out of healing entirely by typing `!settings` and setting `Disable team healing` to `Yes`
+
 
 # CVars:
 
