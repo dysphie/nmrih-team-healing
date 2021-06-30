@@ -19,7 +19,7 @@ public Plugin myinfo = {
     name        = "[NMRiH] Team Healing",
     author      = "Dysphie",
     description = "Allow use of first aid kits and bandages on teammates",
-    version     = "1.0.2",
+    version     = "1.0.3",
     url         = ""
 };
 
@@ -87,7 +87,7 @@ enum struct HealingUse
 	float startTime;
 	float duration;
 	float canTryHealTime;
-	float startAngles[3];
+	// float startAngles[3];
 	Handle think;
 	int sndCursor; // Sfx 
 	Medical medical;
@@ -108,7 +108,7 @@ enum struct HealingUse
 		this.startTime = GetGameTime();
 		healer[target] = this.client;
 
-		GetClientAbsAngles(this.client, this.startAngles);
+		// GetClientAbsAngles(this.client, this.startAngles);
 
 		FreezePlayer(this.client);
 		FreezePlayer(this.target);
@@ -136,13 +136,13 @@ enum struct HealingUse
 		}
 
 		// Player rotated too much
-		float angles[3];
-		GetClientAbsAngles(this.client, angles);
-		if (GetDifferenceBetweenAngles(angles, this.startAngles) > 90.0)
-		{
-			this.Stop();
-			return;
-		}
+		// float angles[3];
+		// GetClientAbsAngles(this.client, angles);
+		// if (GetDifferenceBetweenAngles(angles, this.startAngles) > 90.0)
+		// {
+		// 	this.Stop();
+		// 	return;
+		// }
 
 		if (!(GetClientButtons(this.client) & IN_USE))
 		{
@@ -463,16 +463,16 @@ void ForwardVector(const float vPos[3], const float vAng[3], float fDistance, fl
 	vReturn[2] += vDir[2] * fDistance;
 }
 
-float GetDifferenceBetweenAngles(float fA[3], float fB[3])
-{
-    float fFwdA[3]; 
-    GetAngleVectors(fA, fFwdA, NULL_VECTOR, NULL_VECTOR);
+// float GetDifferenceBetweenAngles(float fA[3], float fB[3])
+// {
+//     float fFwdA[3]; 
+//     GetAngleVectors(fA, fFwdA, NULL_VECTOR, NULL_VECTOR);
 
-    float fFwdB[3]; 
-    GetAngleVectors(fB, fFwdB, NULL_VECTOR, NULL_VECTOR);
+//     float fFwdB[3]; 
+//     GetAngleVectors(fB, fFwdB, NULL_VECTOR, NULL_VECTOR);
 
-    return RadToDeg(ArcCosine(fFwdA[0] * fFwdB[0] + fFwdA[1] * fFwdB[1] + fFwdA[2] * fFwdB[2]));
-}
+//     return RadToDeg(ArcCosine(fFwdA[0] * fFwdB[0] + fFwdA[1] * fFwdB[1] + fFwdA[2] * fFwdB[2]));
+// }
 
 
 Medical GetActiveMedical(int client)
