@@ -12,14 +12,9 @@
 		"en"		"Cooldown, try again in {1} second(s)"
 	}
 
-	"Can't Heal Healthy"
-	{
-		"en"		"Target is healthy"
-	}
-
 	"Can't Heal Clientprefs"
 	{
-		"en"		"Target has disabled healing in their settings"
+		"en"		"Target has opted out of healing"
 	}
 
 	"Being Healed"
