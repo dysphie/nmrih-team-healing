@@ -426,7 +426,6 @@ public void OnPlayerRunCmdPost(int client, int buttons, int impulse, const float
 	}
 
 	// Okay we can heal
-	PrintToServer("Start");
 	healing[client].Start(target, medical);
 }
 
