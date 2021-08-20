@@ -127,17 +127,17 @@
 
 	"Can't Heal Zombies Nearby"
 	{
-		"en"		"Can't heal, zombies nearby"
+		"en"		"Can't heal when zombies are nearby"
 	}
 
 	"Cookies Not Available"
 	{
-		"en"	"Sorry, your preferences couldn't be fetched"
+		"en"	"Your preferences are not available at this time"
 	}
 
 	"Healing Rejected"
 	{
 		"#format" 	"{1:N}"
-		"en"		"{1} rejected healing"
+		"en"		"{1} rejected treatment"
 	}
 }

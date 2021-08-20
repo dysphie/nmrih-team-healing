@@ -31,11 +31,11 @@ char menuItemSound[PLATFORM_MAX_PATH];
 char menuExitSound[PLATFORM_MAX_PATH];
 
 public Plugin myinfo = 
-{
+{	
 	name        = "[NMRiH] Team Healing",
 	author      = "Dysphie",
 	description = "Allow use of first aid kits and bandages on teammates",
-	version     = "1.3.4",
+	version     = "1.3.5",
 	url         = ""
 };
 
@@ -46,6 +46,7 @@ ConVar bandageAmt;
 
 float healAttemptHistory[MAXPLAYERS_NMRIH+1][6];
 float nextBeginHealCheckTime[MAXPLAYERS_NMRIH+1];
+float nextBeginGiveTime[MAXPLAYERS_NMRIH+1];
 
 ConVar cureTime[2];
 
@@ -535,13 +536,11 @@ public void OnClientDisconnect(int client)
 
 public Action OnPlayerRunCmd(int client, int& buttons, int& impulse, float vel[3], float angles[3], int& weapon, int& subtype, int& cmdnum, int& tickcount, int& seed, int mouse[2])
 {
-	int pressed = GetEntProp(client, Prop_Data, "m_afButtonPressed");
-
-	if (pressed & IN_ATTACK2)
-		CheckShouldGive(client);
-
-	else if (pressed & IN_USE)
+	if (buttons & IN_USE)
 		CheckCanBeginHeal(client);
+
+	else if (buttons & IN_ATTACK2 && !(GetEntProp(client, Prop_Data, "m_nOldButtons") & IN_ATTACK2))
+		CheckShouldGive(client);
 
 	return Plugin_Continue;
 }
@@ -600,7 +599,7 @@ void CheckCanBeginHeal(int client)
 		return;
 
 	MedicalID medID = GetMedicalID(activeWeapon);
-	if (medID == Medical_Invalid)
+	if (medID != Medical_FirstAidKit && medID != Medical_Bandages)
 		return;
 
 	if (!IsMedicalReady(activeWeapon))
@@ -646,6 +645,12 @@ void CheckCanBeginHeal(int client)
 
 void CheckShouldGive(int client)
 {
+	float curTime = GetTickedTime();
+	if (nextBeginGiveTime[client] > curTime)
+		return;
+
+	nextBeginGiveTime[client] = curTime + 1.3;
+
 	if (ClientOptedOutSharing(client))
 		return;
 
@@ -695,11 +700,8 @@ void CheckShouldGive(int client)
 	}
 }
 
-int oldDrawViewmodel[MAXPLAYERS_NMRIH];
-
 void DoMedicalAnimation(int client)
 {
-	oldDrawViewmodel[client] = GetEntProp(client, Prop_Send, "m_bDrawViewmodel");
 	SetEntProp(client, Prop_Send, "m_bDrawViewmodel", 0);
 
 	int prop = CreateEntityByName("prop_dynamic_override");
@@ -742,7 +744,7 @@ void AnimDone_Give(const char[] output, int caller, int activator, float delay)
 {
 	int client = GetEntPropEnt(caller, Prop_Send, "m_hOwnerEntity");
 	RemoveEntity(caller);
-	SetEntProp(client, Prop_Send, "m_bDrawViewmodel", oldDrawViewmodel[client]);
+	SetEntProp(client, Prop_Send, "m_bDrawViewmodel", 1);
 }
 
 bool CanFitMedical(int client, MedicalID medID, int giver)
