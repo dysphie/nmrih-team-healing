@@ -1,25 +1,143 @@
 "Phrases"
 {
+	"Cookie Menu Title"
+	{
+		"en"	"Medical Settings"
+	}	
+
+	"Cookie Disabled"
+	{
+		"en"	"DISABLED"
+	}
+
+	"Cookie Enabled"
+	{
+		"en"	"ENABLED"
+	}
+
+	"Cookie Team Healing Name"
+	{
+		"en"	"Team Healing"
+	}
+
+	"Cookie Team Healing Description"
+	{
+		"en"	"Allows other players to heal you"
+	}
+
+	"Cookie Item Sharing Name"
+	{
+		"en"	"Item Sharing"
+	}
+
+	"Cookie Item Sharing Description"
+	{
+		"en"	"Allows you and other players to share items with one another"
+	}
+
+	"Cookie Radius Check Name"
+	{
+		"en"	"Nearby Zombie Check"
+	}
+
+	"Cookie Radius Check Description"
+	{
+		"en"	"Prevents players from healing you when zombies are close"
+	}
+
 	"Healing"
 	{
 		"#format" 	"{1:N}"
 		"en"		"Healing {1}"
 	}
 
-	"Can't Heal Cooldown"
-	{
-		"#format" 	"{1:d}"
-		"en"		"Cooldown, try again in {1} second(s)"
-	}
-
-	"Can't Heal Clientprefs"
-	{
-		"en"		"Target has opted out of healing"
-	}
-
 	"Being Healed"
 	{
 		"#format" 	"{1:N}"
 		"en"		"Being healed by {1}.\nCrouch to cancel"
+	}
+
+	"Cooldown"
+	{
+		"#format" 	"{1:d}"
+		"en"		"Cooldown, try again in {1} sec"
+	}
+
+	"Received Item"
+	{
+		"#format" "{1:N},{2:T}"
+		"en"	"{1} gave you {2}"
+	}
+
+	"Gave Item"
+	{
+		"#format" "{1:N},{2:T}"
+		"en"	"You gave {1} {2}"
+	}
+
+	"Target Already Owns"
+	{
+		"#format" "{1:N},{2:T}"
+		"en"	"{1} already owns {2}"
+	}
+
+	"Target Is Full"
+	{
+		"#format" "{1:N}"
+		"en"	"{1}'s inventory is full"
+	}
+
+	"Target Opted Out"
+	{
+		"#format" "{1:N}"
+		"en"	"{1} has opted out of this feature"
+	}
+
+	"First Aid Kit"
+	{
+		"en"	"a first aid kit"
+	}
+
+	"Bandages"
+	{
+		"en"	"bandages"
+	}
+
+	"Pills"
+	{
+		"en"	"pills"
+	}
+
+	"Gene Therapy"
+	{
+		"en"	"a gene therapy"
+	}
+
+	"Can't Heal Cooldown"
+	{
+		"#format" 	"{1:d}"
+		"en"		"Cooldown, try again in {1}s"
+	}
+
+	"Can't Heal Healthy"
+	{
+		"#format" 	"{1:N}"
+		"en"		"{1} is healthy"
+	}
+
+	"Can't Heal Zombies Nearby"
+	{
+		"en"		"Can't heal near zombies"
+	}
+
+	"Cookies Not Available"
+	{
+		"en"	"Sorry, your preferences couldn't be fetched"
+	}
+
+	"Healing Rejected"
+	{
+		"#format" 	"{1:N}"
+		"en"		"{1} rejected healing"
 	}
 }
