@@ -127,7 +127,7 @@
 
 	"Can't Heal Zombies Nearby"
 	{
-		"en"		"Can't heal near zombies"
+		"en"		"Can't heal, zombies nearby"
 	}
 
 	"Cookies Not Available"
