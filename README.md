@@ -10,6 +10,9 @@ Equip a first aid kit or bandages and hold USE (Default: `E`) on another player 
 
 
 ## Sharing supplies
+
+Currently only available in experimental builds, tagged as "pre-release" in the [releases](github.com/dysphie/nmrih-team-healing/releases) section.
+
 Equip a medical supply and use secondary attack (Default: Right-click) on another player to give it to them.
 
 <img src="https://user-images.githubusercontent.com/11559683/130325710-7889c61b-49b5-4895-85ce-866f48c0f4fd.png" height="400">
