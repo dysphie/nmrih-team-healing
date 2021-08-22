@@ -35,7 +35,7 @@ public Plugin myinfo =
 	name        = "[NMRiH] Team Healing",
 	author      = "Dysphie",
 	description = "Allow use of first aid kits and bandages on teammates",
-	version     = "1.3.5",
+	version     = "1.3.7",
 	url         = ""
 };
 
@@ -679,7 +679,7 @@ void CheckShouldGive(int client)
 	GetClientAbsOrigin(target, targetPos);
 
 	SDKHooks_DropWeapon(client, activeWeapon, targetPos);
-	AcceptEntityInput(activeWeapon, "Use", target);
+	AcceptEntityInput(activeWeapon, "Use", target, target);
 
 	DoMedicalAnimation(client);
 
@@ -734,10 +734,19 @@ void DoMedicalAnimation(int client)
 	// Remove prop when animation ends
 	HookSingleEntityOutput(prop, "OnAnimationDone", AnimDone_Give, true);
 
+	SDKHook(prop, SDKHook_SetTransmit, FakeVMTransmit);
+
 	// Also remove after 5 seconds in case the above callback doesn't fire somehow
 	SetVariantString("OnUser1 !self:Kill::5:-1");
 	AcceptEntityInput(prop, "AddOutput");
 	AcceptEntityInput(prop, "FireUser1");
+}
+
+public Action FakeVMTransmit(int entity, int client)
+{
+	if (GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity") != client)
+		return Plugin_Handled;
+	return Plugin_Continue;
 }
 
 void AnimDone_Give(const char[] output, int caller, int activator, float delay) 
