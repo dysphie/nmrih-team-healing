@@ -3,6 +3,7 @@
 Allows survivors to share medical supplies and heal each other!
 
 ## Installation
+- (Optional) Upgrade to Sourcemod 1.11.0.6506 or higher. This will enable some extra features.
 - Grab the latest zip from the [releases](https://github.com/dysphie/nmrih-team-healing/releases) section.
 - Extract the contents into `addons/sourcemod`
 - Refresh the plugin list (`sm plugins refresh` in server console)
@@ -10,7 +11,11 @@ Allows survivors to share medical supplies and heal each other!
 ## Usage
 
 ### Healing 
-Equip a first aid kit or bandages and hold USE (Default: `E`) on another player to treat them. Team healing is slightly faster than self healing by default. Players can break out of healing by crouching. There's also an exponential cooldown on healing to prevent griefing.
+Equip a first aid kit or bandages and hold USE (Default: `E`) on another player to treat them. 
+- Team healing is slightly faster than self healing by default. 
+- Players can break out of healing by crouching. 
+- There's an exponential cooldown on healing attempts to prevent griefing.
+- On Sourcemod 1.11.0.6506 or higher, healing is disabled when zombies are too close. Clients can toggle this protection off in their settings.
 
 <img src="https://user-images.githubusercontent.com/11559683/123883869-44b7a900-d920-11eb-821e-a109f5c0f3d0.png" height="400">
 
