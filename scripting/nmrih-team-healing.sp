@@ -1,6 +1,4 @@
 /* TODO:
- * - Better cooldown system, differentiate between graceful cancels and healAttemptHistory
- * - Group up all "Do X for medical" functions into a struct
  * - Restore old progress bar in case of overlap
 */
 
@@ -35,7 +33,7 @@ public Plugin myinfo =
 	name        = "[NMRiH] Team Healing",
 	author      = "Dysphie",
 	description = "Allow use of first aid kits and bandages on teammates",
-	version     = "1.3.7",
+	version     = "1.4.0",
 	url         = ""
 };
 
@@ -190,6 +188,9 @@ enum struct HealingUse
 			this.Stop(false);
 			return;
 		}
+
+		PrintCenterText(target, "%t", "Being Healed", client);
+		PrintCenterText(client, "%t", "Healing", target);
 
 		// TODO: This seems overly convoluted
 		float curTime = GetTickedTime();
@@ -536,10 +537,12 @@ public void OnClientDisconnect(int client)
 
 public Action OnPlayerRunCmd(int client, int& buttons, int& impulse, float vel[3], float angles[3], int& weapon, int& subtype, int& cmdnum, int& tickcount, int& seed, int mouse[2])
 {
-	if (buttons & IN_USE)
+	int oldButtons = GetEntProp(client, Prop_Data, "m_nOldButtons");
+
+	if (buttons & IN_USE && !(oldButtons & IN_USE))
 		CheckCanBeginHeal(client);
 
-	else if (buttons & IN_ATTACK2 && !(GetEntProp(client, Prop_Data, "m_nOldButtons") & IN_ATTACK2))
+	else if (buttons & IN_ATTACK2 && !(oldButtons & IN_ATTACK2))
 		CheckShouldGive(client);
 
 	return Plugin_Continue;
