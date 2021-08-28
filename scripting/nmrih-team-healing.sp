@@ -279,12 +279,21 @@ enum struct HealingUse
 
 }
 
+bool canDoRadial;
+
 HealingUse healing[MAXPLAYERS_NMRIH+1];
 
 Cookie optOutHealCookie, optOutShareCookie, disableZedCheckCookie;
 
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+    MarkNativeAsOptional("TR_EnumerateEntitiesSphere");
+    return APLRes_Success;
+}
+
 public void OnPluginStart()
 {
+	canDoRadial = GetFeatureStatus(FeatureType_Native, "TR_EnumerateEntitiesSphere") == FeatureStatus_Available;
 	cvMaxInvCarry = FindConVar("inv_maxcarry");
 
 	LoadTranslations("core.phrases");
@@ -428,13 +437,17 @@ void ShowToggleMenu(int client)
 	panel.DrawText(" ");
 
 	// Zombie check cookie
-	FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Radius Check Name", client, 
-		doRadiusCheck ? "Cookie Enabled" : "Cookie Disabled", client);
-	panel.DrawItem(buffer);	
-	FormatEx(buffer, sizeof(buffer), "%T", "Cookie Radius Check Description", client);
-	panel.DrawText(buffer);
 
-	panel.DrawText(" ");
+	if (canDoRadial)
+	{
+		FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Radius Check Name", client, 
+			doRadiusCheck ? "Cookie Enabled" : "Cookie Disabled", client);
+		panel.DrawItem(buffer);	
+		FormatEx(buffer, sizeof(buffer), "%T", "Cookie Radius Check Description", client);
+		panel.DrawText(buffer);
+
+		panel.DrawText(" ");
+	}
 
 	panel.CurrentKey = 8;
 	FormatEx(buffer, sizeof(buffer), "%T", "Back", client);
@@ -1007,6 +1020,9 @@ int GetCarriedWeight(int client)
 
 bool AreZombiesNearby(int client)
 {
+	if (!canDoRadial)
+		return false;
+
 	bool result;
 
 	float clientPos[3];
