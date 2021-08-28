@@ -10,7 +10,7 @@ Allows survivors to share medical supplies and heal each other!
 ## Usage
 
 ### Healing 
-Equip a first aid kit or bandages and hold USE (Default: `E`) on another player to treat them. Team healing is slightly faster than self healing by default. Players can break out of healing by crouching.
+Equip a first aid kit or bandages and hold USE (Default: `E`) on another player to treat them. Team healing is slightly faster than self healing by default. Players can break out of healing by crouching. There's also an exponential cooldown on healing to prevent griefing.
 
 <img src="https://user-images.githubusercontent.com/11559683/123883869-44b7a900-d920-11eb-821e-a109f5c0f3d0.png" height="400">
 
