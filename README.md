@@ -32,7 +32,9 @@ All messages in this plugin can be translated via `translations/team-healing.phr
 
 ## Medical Sounds
 
-Medical sounds can be tweaked via `configs/teamhealing.cfg`
+Medical sounds can be tweaked via `configs/teamhealing.cfg`. 
+
+Note: At the moment, custom sounds **will not** be automatically added to the downloads list
 
 ## CVars
 
