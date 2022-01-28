@@ -1,11 +1,8 @@
-/* TODO:
- * - Restore old progress bar in case of overlap
-*/
-
-
 #include <sdktools>
 #include <sdkhooks>
 #include <clientprefs>
+#include <vscript_proxy>
+#include <nmr_teamhealing>
 
 #pragma semicolon 1
 #pragma newdecls required
@@ -16,56 +13,54 @@
 #define SEQ_IDLE 4
 #define SEQ_WALKIDLE 7
 
-#define AMMO_INDEX_GRENADE 	9
-#define AMMO_INDEX_MOLOTOV 	10
-#define AMMO_INDEX_TNT 		11
+#define ZOMBIE_SAFE_RADIUS 180.0
 
-#define SND_GIVE_GENERIC "weapons/melee/Melee_Draw_Temp1.wav"
-#define SND_GIVE_PILLS "player/medkit/medpills_draw_01.wav"
-
-#define MDL_FAKE_HANDS "models/items/firstaid/v_item_firstaid.mdl"
-
-char menuItemSound[PLATFORM_MAX_PATH];
-char menuExitSound[PLATFORM_MAX_PATH];
+#define NMR_FL_ATCONTROLS 128
 
 public Plugin myinfo = 
 {	
 	name        = "[NMRiH] Team Healing",
 	author      = "Dysphie",
 	description = "Allow use of first aid kits and bandages on teammates",
-	version     = "1.4.0",
+	version     = "1.5.0",
 	url         = ""
 };
 
-ConVar cvUseDistance;
-ConVar healCooldown;
-ConVar medkitAmt;
-ConVar bandageAmt;
+
+bool healDisabled[MAXPLAYERS_NMRIH+1];
+bool ignoreRadiusCheck[MAXPLAYERS_NMRIH+1];
+
+char menuItemSound[PLATFORM_MAX_PATH];
+char menuExitSound[PLATFORM_MAX_PATH];
+
+bool sphereQueryAvailable;
+Cookie healCookie, radiusCookie;
 
 float healAttemptHistory[MAXPLAYERS_NMRIH+1][6];
 float nextBeginHealCheckTime[MAXPLAYERS_NMRIH+1];
-float nextBeginGiveTime[MAXPLAYERS_NMRIH+1];
 
+GlobalForward healedFwd;
+GlobalForward beginHealFwd;
+
+ConVar healAmount[2];
 ConVar cureTime[2];
 
-char medPhrases[][] = 
-{
-	"First Aid Kit",
-	"Bandages",
-	"Pills",
-	"Gene Therapy"
-};
+ConVar cvUseDistance;
+ConVar pluginEnabled;
 
-enum MedicalID
-{
-	Medical_Invalid = -1,
-	Medical_FirstAidKit,
-	Medical_Bandages,
-	Medical_Pills,
-	Medical_Gene,
-	Medical_MAX
+// Temporary variables used by enumerator traces
+float _traceStartPos[3];
+bool _traceResult;
+
+ArrayList sfx[2];
+
+enum
+{	
+	COOKIEMENU_HEAL_TOGGLE = 1,
+	COOKIEMENU_RADIUS_TOGGLE,
+	COOKIEMENU_BACK = 8,
+	COOKIEMENU_EXIT = 10,
 }
-
 
 enum HealRequestResult
 {
@@ -76,24 +71,9 @@ enum HealRequestResult
 
 enum struct SoundMap
 {
-	ArrayList keys;
-	ArrayList sounds;
-
-	void Init()
-	{
-		this.keys = new ArrayList();
-		this.sounds = new ArrayList(32);
-	}
-
-	void Set(int key, const char[] sound)
-	{
-		this.keys.Push(key);
-		this.sounds.PushString(sound);
-	}
+	int pct;
+	char sound[PLATFORM_MAX_PATH];
 }
-
-SoundMap sfx[2];
-ConVar cvMaxInvCarry;
 
 enum VoiceCommand
 {
@@ -119,6 +99,26 @@ enum struct HealingUse
 
 	void Start(int client, int target, int weapon, MedicalID medID)
 	{
+		// Ask other plugins if we should proceed
+		bool applyCooldown;
+		Action result;
+
+		Call_StartForward(beginHealFwd);
+		Call_PushCell(client);
+		Call_PushCell(target);
+		Call_PushCell(weapon);
+		Call_PushCell(medID);
+		Call_PushCellRef(applyCooldown);
+		Call_Finish(result);
+
+		if (result >= Plugin_Handled)
+		{
+			if (applyCooldown)
+				RememberLastHealAttempt(target);
+			
+			return;
+		}
+
 		this.targetSerial = GetClientSerial(target);
 		this.clientSerial = GetClientSerial(client);
 		this.medID = medID;
@@ -147,9 +147,6 @@ enum struct HealingUse
 
 		for (;;)
 		{
-			if (this.medID == Medical_Invalid)
-				break;
-
 			if (!client || !target)
 				break;
 
@@ -170,7 +167,7 @@ enum struct HealingUse
 
 			if (!CanClientConsumeMedical(target, this.medID))
 				break;
-			
+
 			float clientPos[3], targetPos[3];
 			GetClientAbsOrigin(target, targetPos);
 			GetClientAbsOrigin(client, clientPos);
@@ -189,48 +186,54 @@ enum struct HealingUse
 			return;
 		}
 
+		// FL_ATCONTROLS is unreliable and allows players to move sometimes
+		// just reapply the effect on each think
+		FreezePlayer(client);
+		FreezePlayer(target);
+
 		PrintCenterText(target, "%t", "Being Healed", client);
 		PrintCenterText(client, "%t", "Healing", target);
 
-		// TODO: This seems overly convoluted
 		float curTime = GetTickedTime();
-		char sound[32]; 
-		float elapsedPct = (curTime - this.startTime) / GetMedicalDuration(this.medID) * 100;
+		float elapsed = curTime - this.startTime;
+		float elapsedPct = elapsed / this.duration * 100;
 
-		int max = sfx[this.medID].keys.Length;
-		for (; this.sndCursor < max; this.sndCursor++)
+		int maxSounds = sfx[this.medID].Length;
+
+		while (this.sndCursor < maxSounds)
 		{
-			int playAtPct = sfx[this.medID].keys.Get(this.sndCursor);
-
-			// Bail if we've exhausted the sounds to play this frame
-			if (elapsedPct < playAtPct)
+			SoundMap smap;
+			sfx[this.medID].GetArray(this.sndCursor, smap);
+			if (smap.pct > elapsedPct)
 				break;
 
-			sfx[this.medID].sounds.GetString(this.sndCursor, sound, sizeof(sound));
-			EmitMedicalSound(client, sound);
+			EmitMedicalSound(client, smap.sound);
+			this.sndCursor++;
 		}
 
-		if (curTime >= this.startTime + this.duration)
+		if (elapsed >= this.duration)
 			this.Succeed(client, target);
 	}
 
 	void Succeed(int client, int target)
 	{
-		DoFunctionForMedical(this.medID, target);
+		ApplyMedicalEffects(target, this.medID);
+
+		StopHealAction(target);
 		TryVoiceCommand(target, VoiceCommand_ThankYou); // A little courtesy goes a long way!
+		
+		Call_StartForward(healedFwd);
+		Call_PushCell(target);
+		Call_PushCell(client);
+		Call_PushCell(EntRefToEntIndex(this.itemRef));
+		Call_PushCell(this.medID);
+		Call_Finish();
 
-		int medical = view_as<int>(FindMedical(client, this.medID));
-		if (medical == -1)
-		{
-			LogError("Heal succeeded but client didn't own medical!");
-		}
-		else
-		{
-			SDKHooks_DropWeapon(client, medical);
-			RemoveEntity(medical);
-		}
-
+		SDKHooks_DropWeapon(client, this.itemRef);
+		RemoveEntity(this.itemRef);
+		
 		this.Stop(true);
+
 	}
 
 	void Stop(bool success = false)
@@ -279,25 +282,25 @@ enum struct HealingUse
 
 }
 
-bool canDoRadial;
-
 HealingUse healing[MAXPLAYERS_NMRIH+1];
-
-Cookie optOutHealCookie, optOutShareCookie, disableZedCheckCookie;
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
-    MarkNativeAsOptional("TR_EnumerateEntitiesSphere");
-    return APLRes_Success;
+	MarkNativeAsOptional("TR_EnumerateEntitiesSphere");
+	return APLRes_Success;
 }
 
 public void OnPluginStart()
 {
-	canDoRadial = GetFeatureStatus(FeatureType_Native, "TR_EnumerateEntitiesSphere") == FeatureStatus_Available;
-	cvMaxInvCarry = FindConVar("inv_maxcarry");
+	healedFwd = new GlobalForward("OnClientTeamHealed", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
+	beginHealFwd = new GlobalForward("OnClientBeginTeamHeal", ET_Event, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_CellByRef);
 
-	LoadTranslations("core.phrases");
+	sphereQueryAvailable = GetFeatureStatus(FeatureType_Native, "TR_EnumerateEntitiesSphere") == FeatureStatus_Available;
+
+	LoadTranslations("core.phrases"); // used for cookie messages
 	LoadTranslations("team-healing.phrases");
+
+	pluginEnabled = CreateConVar("sm_team_heal_enabled", "1");
 
 	cureTime[Medical_FirstAidKit] = CreateConVar("sm_team_heal_first_aid_time", "8.1", 
 					"Seconds it takes for the first aid kit to heal a teammate");
@@ -305,67 +308,117 @@ public void OnPluginStart()
 	cureTime[Medical_Bandages] = CreateConVar("sm_team_heal_bandage_time", "2.8",
 					"Seconds it takes for bandages to heal a teammate");
 
-	healCooldown = CreateConVar("sm_team_heal_cooldown", "5.0",
-					"Cooldown period after a failed team heal attempt");
-	cvUseDistance = CreateConVar("sm_team_heal_max_use_distance", "50.0",
-					"Maximum use range for medical items");
+	cvUseDistance = FindConVar("sv_use_max_reach");
 
-	medkitAmt = FindConVar("sv_first_aid_heal_amt");
-	bandageAmt = FindConVar("sv_bandage_heal_amt");
+	healAmount[Medical_FirstAidKit] = FindConVar("sv_first_aid_heal_amt");
+	healAmount[Medical_Bandages] = FindConVar("sv_bandage_heal_amt");
 
 	for (int i = 1; i <= MaxClients; i++)
 		if (IsClientInGame(i))
 			OnClientConnected(i);
 
-	SoundMap medkitSnd;
-	medkitSnd.Init();
-	medkitSnd.Set(0, "Medkit.Open");
-	medkitSnd.Set(8, "MedPills.Draw");
-	medkitSnd.Set(13, "MedPills.Open");
-	medkitSnd.Set(17, "MedPills.Shake");
-	medkitSnd.Set(19, "MedPills.Shake");
-	medkitSnd.Set(30, "Medkit.Shuffle");
-	medkitSnd.Set(39, "Stitch.Prepare");
-	medkitSnd.Set(46, "Stitch.Flesh");
-	medkitSnd.Set(49, "Weapon_db.GenericFoley");
-	medkitSnd.Set(52, "Stitch.Flesh");
-	medkitSnd.Set(55, "Stitch.Flesh");
-	medkitSnd.Set(58, "Medkit.Shuffle");
-	medkitSnd.Set(66, "Scissors.Snip");
-	medkitSnd.Set(67, "Scissors.Snip");
-	medkitSnd.Set(75, "Scissors.Snip");
-	medkitSnd.Set(78, "Weapon_db.GenericFoley");
-	medkitSnd.Set(79, "Medkit.Shuffle");
-	medkitSnd.Set(84, "Weapon_db.GenericFoley");
-	medkitSnd.Set(90, "Weapon_db.GenericFoley");
-	medkitSnd.Set(94, "Tape.unravel");
-
-	SoundMap bandageSnd;
-	bandageSnd.Init();
-	bandageSnd.Set(0, "Weapon_db.GenericFoley");
-	bandageSnd.Set(41, "Bandage.Unravel1");
-	bandageSnd.Set(55, "Bandage.Unravel2");
-	bandageSnd.Set(80, "Bandage.Apply");
-
-	sfx[Medical_FirstAidKit] = medkitSnd;
-	sfx[Medical_Bandages] = bandageSnd;
+	LoadMedicalSounds();
 
 	AutoExecConfig();
 
-	optOutHealCookie = RegClientCookie("disable_team_heal", "Disable team healing", CookieAccess_Public);
-	optOutShareCookie = RegClientCookie("disable_team_share", "Disable team sharing", CookieAccess_Public);
-	disableZedCheckCookie = RegClientCookie("disable_team_heal_radius_check", " ", CookieAccess_Public);
+	healCookie = new Cookie("disable_team_heal", "Prevents teammates from healing you", CookieAccess_Public);
+	radiusCookie = new Cookie("disable_team_heal_radius_check", "Disables heal prevention when zombies are close", CookieAccess_Public);
 
 	SetCookieMenuItem(EntryCookieMenu, 0, "Team Healing");
 
 	// Sounds used by cookie menu
-
 	char path[PLATFORM_MAX_PATH];
 	BuildPath(Path_SM, path, sizeof(path), "configs/core.cfg");
 	SMCParser parser = new SMCParser();
 	parser.OnKeyValue = OnKeyValue;
 	parser.ParseFile(path);
 	delete parser;
+
+	RegAdminCmd("teamhealing_reload_sounds", Cmd_ReloadMedicalSounds, ADMFLAG_GENERIC);
+}
+
+
+
+Action Cmd_ReloadMedicalSounds(int client, int args)
+{
+	LoadMedicalSounds();
+	ReplyToCommand(client, "Reloaded medical sounds from config");
+
+	// If playing a map, precache the new sounds
+	char a[2];
+	if (GetCurrentMap(a, sizeof(a)))
+		PrecacheMedicalSounds();
+	 
+	return Plugin_Handled;
+}
+
+void LoadMedicalSounds()
+{
+	delete sfx[Medical_FirstAidKit];
+	delete sfx[Medical_Bandages];
+
+	sfx[Medical_FirstAidKit] = new ArrayList(sizeof(SoundMap));
+	sfx[Medical_Bandages] = new ArrayList(sizeof(SoundMap));
+
+	char path[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, path, sizeof(path), "configs/teamhealing.cfg");
+
+	KeyValues kv = new KeyValues("Team Healing");
+	if (!kv.ImportFromFile(path))
+	{
+		LogError("Failed to locate config file: %s. Medical sounds will be unavailable", path);
+		delete kv;
+		return;
+	}
+
+	if (!kv.JumpToKey("Heal Sounds"))
+	{
+		delete kv;
+		return;
+	}
+	
+	SaveHealSounds(kv, "item_first_aid", sfx[Medical_FirstAidKit]);
+	SaveHealSounds(kv, "item_bandages", sfx[Medical_Bandages]);
+
+	// kv.GoBack();
+	delete kv;
+}
+
+void SaveHealSounds(KeyValues kv, const char[] key, ArrayList arr)
+{
+	if (kv.JumpToKey(key))
+	{
+		if (kv.GotoFirstSubKey(false))
+		{
+			do
+			{
+				SoundMap smap;
+
+				char pctStr[11]; 
+				kv.GetSectionName(pctStr, sizeof(pctStr));
+
+				if (StringToIntEx(pctStr, smap.pct) != strlen(pctStr))
+				{
+					LogError("Got bogus sound key \"%s\" in \"%s\"", pctStr, key);
+					continue;
+				}
+
+				kv.GetString(NULL_STRING, smap.sound, sizeof(smap.sound));
+				if (!smap.sound[0])
+				{
+					LogError("Got empty sound entry for \"%s\" in \"%s\"", pctStr, key);
+					continue;	
+				}
+
+				arr.PushArray(smap);
+
+			} while (kv.GotoNextKey(false));
+		}
+
+		kv.GoBack();
+	}
+
+	kv.GoBack();
 }
 
 SMCResult OnKeyValue(SMCParser smc, const char[] key, const char[] value, bool key_quotes, bool value_quotes)
@@ -374,6 +427,8 @@ SMCResult OnKeyValue(SMCParser smc, const char[] key, const char[] value, bool k
 		strcopy(menuItemSound, sizeof(menuItemSound), value);
 	else if (!strcmp(key, "MenuExitSound"))
 		strcopy(menuExitSound, sizeof(menuExitSound), value);
+
+	return SMCParse_Continue;
 }
 
 void EntryCookieMenu(int client, CookieMenuAction action, any info, char[] buffer, int maxlen)
@@ -385,34 +440,21 @@ void EntryCookieMenu(int client, CookieMenuAction action, any info, char[] buffe
 
 	else if (action == CookieMenuAction_SelectOption)
 	{
-		if (!AreClientCookiesCached(client))
-		{
-			PrintToChat(client, "%t", "Cookies Not Available");
-			return;
-		}
-
 		ShowToggleMenu(client);
 	}
 }
 
+public void OnClientCookiesCached(int client)
+{
+	healDisabled[client] = GetCookieBool(client, healCookie);
+	ignoreRadiusCheck[client] = GetCookieBool(client, radiusCookie);
+}
+
 void ShowToggleMenu(int client)
 {
-	bool healAllowed, shareAllowed, doRadiusCheck;
-
-	char value[2];
-	optOutHealCookie.Get(client, value, sizeof(value));
-	healAllowed = value[0] != '1';
-
-	optOutShareCookie.Get(client, value, sizeof(value));
-	shareAllowed = value[0] != '1';
-
-	disableZedCheckCookie.Get(client, value, sizeof(value));
-	doRadiusCheck = value[0] != '1';
-
 	Panel panel = new Panel();
 
 	char buffer[2048];
-
 	FormatEx(buffer, sizeof(buffer), "%T", "Cookie Menu Title", client);
 	panel.SetTitle(buffer);
 
@@ -420,28 +462,18 @@ void ShowToggleMenu(int client)
 
 	// Team healing cookie
 	FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Team Healing Name", client, 
-		healAllowed ? "Cookie Enabled" : "Cookie Disabled", client);
+		healDisabled[client] ? "Cookie Disabled" : "Cookie Enabled", client);
 	panel.DrawItem(buffer);
 	FormatEx(buffer, sizeof(buffer), "%T", "Cookie Team Healing Description", client);
 	panel.DrawText(buffer);
 
 	panel.DrawText(" ");
 
-	// Item sharing cookie
-	FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Item Sharing Name", client, 
-		shareAllowed ? "Cookie Enabled" : "Cookie Disabled", client);
-	panel.DrawItem(buffer);
-	FormatEx(buffer, sizeof(buffer), "%T", "Cookie Item Sharing Description", client);
-	panel.DrawText(buffer);
-
-	panel.DrawText(" ");
-
 	// Zombie check cookie
-
-	if (canDoRadial)
+	if (sphereQueryAvailable)
 	{
 		FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Radius Check Name", client, 
-			doRadiusCheck ? "Cookie Enabled" : "Cookie Disabled", client);
+			ignoreRadiusCheck[client] ? "Cookie Disabled" : "Cookie Enabled", client);
 		panel.DrawItem(buffer);	
 		FormatEx(buffer, sizeof(buffer), "%T", "Cookie Radius Check Description", client);
 		panel.DrawText(buffer);
@@ -463,51 +495,36 @@ void ShowToggleMenu(int client)
 	delete panel;
 }
 
-public int CookieTogglePanel(Menu menu, MenuAction action, int param1, int param2)
+int CookieTogglePanel(Menu menu, MenuAction action, int param1, int param2)
 {
 	if (action == MenuAction_Select)
 	{
-		if (!AreClientCookiesCached(param1))
+		switch (param2)
 		{
-			PrintToChat(param1, "%t", "Cookies Not Available");
-			return 0;
+			case COOKIEMENU_HEAL_TOGGLE:
+			{
+				healDisabled[param1] = !healDisabled[param1];
+				SetCookieBool(param1, healCookie, healDisabled[param1]);
+				ShowToggleMenu(param1);	
+			}
+			case COOKIEMENU_RADIUS_TOGGLE:
+			{
+				ignoreRadiusCheck[param1] = !ignoreRadiusCheck[param1];
+				SetCookieBool(param1, radiusCookie, ignoreRadiusCheck[param1]);
+				ShowToggleMenu(param1);
+			}
+			case COOKIEMENU_BACK:
+			{
+				ShowCookieMenu(param1);
+			}
+			case COOKIEMENU_EXIT:
+			{
+				EmitSoundToClient(param1, menuExitSound);
+				return 0;
+			}
 		}
 
-		char info[2];
-
-		if (param2 == 1) // Team heal
-		{
-			optOutHealCookie.Get(param1, info, sizeof(info));
-			optOutHealCookie.Set(param1, info[0] == '1' ? "0" : "1");
-			EmitSoundToClient(param1, menuItemSound);
-			ShowToggleMenu(param1);
-		}
-		else if (param2 == 2) // Item sharing
-		{
-			optOutShareCookie.Get(param1, info, sizeof(info));
-			optOutShareCookie.Set(param1, info[0] == '1' ? "0" : "1");
-			EmitSoundToClient(param1, menuItemSound);
-			ShowToggleMenu(param1);
-		}
-
-		else if (param2 == 3) // Radius check
-		{
-			disableZedCheckCookie.Get(param1, info, sizeof(info));
-			disableZedCheckCookie.Set(param1, info[0] == '1' ? "0" : "1");
-			EmitSoundToClient(param1, menuItemSound);
-			ShowToggleMenu(param1);
-		}
-
-		else if (param2 == 8) // Back
-		{
-			EmitSoundToClient(param1, menuItemSound);
-			ShowCookieMenu(param1);
-		}
-
-		else if (param2 == 10) // Exit
-		{
-			EmitSoundToClient(param1, menuExitSound);
-		}
+		EmitSoundToClient(param1, menuItemSound);
 	}
 
 	return 0;
@@ -515,16 +532,29 @@ public int CookieTogglePanel(Menu menu, MenuAction action, int param1, int param
 
 public void OnMapStart()
 {
-	PrecacheModel(MDL_FAKE_HANDS);
-	PrecacheSound(SND_GIVE_PILLS);
-	PrecacheSound(SND_GIVE_GENERIC);
+	PrecacheMedicalSounds();
 	PrecacheSound(menuExitSound);
 	PrecacheSound(menuItemSound);
 }
 
+void PrecacheMedicalSounds()
+{
+	for (int i; i < sizeof(sfx); i++)
+	{
+		for (int j; j < sfx[i].Length; j++)
+		{
+			SoundMap smap;
+			sfx[i].GetArray(j, smap, sizeof(smap));
+
+			if (smap.sound[0])
+				PrecacheScriptSound(smap.sound);
+		}
+	}
+}
+
 void EmitMedicalSound(int client, const char[] game_sound)
 {
-	static char sound_name[128];
+	static char sound_name[PLATFORM_MAX_PATH];
 
 	int entity;
 	int channel = SNDCHAN_AUTO;
@@ -538,6 +568,9 @@ void EmitMedicalSound(int client, const char[] game_sound)
 
 public void OnClientConnected(int client)
 {
+	healDisabled[client] = false;
+	ignoreRadiusCheck[client] = false;
+
 	healing[client].Init(client);
 	ClearHealAttemptsHistory(client);
 }
@@ -550,18 +583,16 @@ public void OnClientDisconnect(int client)
 
 public Action OnPlayerRunCmd(int client, int& buttons, int& impulse, float vel[3], float angles[3], int& weapon, int& subtype, int& cmdnum, int& tickcount, int& seed, int mouse[2])
 {
-	int oldButtons = GetEntProp(client, Prop_Data, "m_nOldButtons");
-
-	if (buttons & IN_USE && !(oldButtons & IN_USE))
+	if (buttons & IN_USE && pluginEnabled.BoolValue &&
+	 	!(GetEntProp(client, Prop_Data, "m_nOldButtons") & IN_USE))
+	{
 		CheckCanBeginHeal(client);
-
-	else if (buttons & IN_ATTACK2 && !(oldButtons & IN_ATTACK2))
-		CheckShouldGive(client);
+	}
 
 	return Plugin_Continue;
 }
 
-public Action _ThinkHelper(Handle timer, int index)
+Action _ThinkHelper(Handle timer, int index)
 {
 	// Think fn was stopped externally
 	if (!healing[index].IsActive())
@@ -606,10 +637,6 @@ void CheckCanBeginHeal(int client)
 	if (healing[client].IsActive())
 		return;
 
-	// Undone: Let people heal even if they're refusing healing themselves
-	// if (ClientOptedOutHealing(client))
-	// 	return;
-
 	int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
 	if (activeWeapon == -1)
 		return;
@@ -627,7 +654,7 @@ void CheckCanBeginHeal(int client)
 		return;
 
 	// Target doesn't want it
-	if (ClientOptedOutHealing(target))
+	if (healDisabled[target])
 	{
 		PrintCenterText(client, "%t", "Target Opted Out", target);
 		return;
@@ -649,7 +676,7 @@ void CheckCanBeginHeal(int client)
 		return;
 	}
 
-	if (AreZombiesNearby(target))
+	if (!ignoreRadiusCheck[target] && AreZombiesNearby(target))
 	{
 		PrintCenterText(client, "%t", "Can't Heal Zombies Nearby", target);
 		return;
@@ -657,146 +684,6 @@ void CheckCanBeginHeal(int client)
 
 	// Okay we can heal
 	healing[client].Start(client, target, activeWeapon, medID);	
-}
-
-void CheckShouldGive(int client)
-{
-	float curTime = GetTickedTime();
-	if (nextBeginGiveTime[client] > curTime)
-		return;
-
-	nextBeginGiveTime[client] = curTime + 1.3;
-
-	if (ClientOptedOutSharing(client))
-		return;
-
-	int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
-	if (activeWeapon == -1)
-		return;
-
-	MedicalID medID = GetMedicalID(activeWeapon);
-	if (medID == Medical_Invalid)
-		return;
-
-	int target = GetClientUseTarget(client, 90.0);
-	if (target == -1)
-		return;
-
-	if (ClientOptedOutSharing(target))
-	{
-		PrintCenterText(client, "%t", "Target Opted Out", target);
-		return;
-	}
-
-	if (!CanFitMedical(target, medID, client))
-		return;
-
-	float targetPos[3];
-	GetClientAbsOrigin(target, targetPos);
-
-	SDKHooks_DropWeapon(client, activeWeapon, targetPos);
-	AcceptEntityInput(activeWeapon, "Use", target, target);
-
-	DoMedicalAnimation(client);
-
-	TryVoiceCommand(target, VoiceCommand_ThankYou);
-
-	PrintCenterText(target, "%t", "Received Item", client, medPhrases[medID], target);
-	PrintCenterText(client, "%t", "Gave Item", target, medPhrases[medID], client);
-
-	if (medID == Medical_Pills)
-	{
-		EmitSoundToClient(client, SND_GIVE_PILLS, client);
-		EmitSoundToClient(target, SND_GIVE_PILLS, target);
-	}
-	else
-	{
-		EmitSoundToClient(client, SND_GIVE_GENERIC, client);
-		EmitSoundToClient(target, SND_GIVE_GENERIC, target);
-	}
-}
-
-void DoMedicalAnimation(int client)
-{
-	SetEntProp(client, Prop_Send, "m_bDrawViewmodel", 0);
-
-	int prop = CreateEntityByName("prop_dynamic_override");
-
-	DispatchKeyValue(prop, "model", MDL_FAKE_HANDS);
-	DispatchKeyValue(prop, "disablereceiveshadows", "1");
-	DispatchKeyValue(prop, "disableshadows", "1");
-	DispatchKeyValue(prop, "targetname", "dummy");
-	DispatchKeyValue(prop, "solid", "0");
-	DispatchSpawn(prop);
-
-	SetEntityMoveType(prop, MOVETYPE_NONE);
-	int viewmodel = GetEntPropEnt(client, Prop_Data, "m_hViewModel", 0);
-
-	float pos[3], ang[3];
-	GetEntPropVector(viewmodel, Prop_Data, "m_vecAbsOrigin", pos);
-	GetEntPropVector(viewmodel, Prop_Data, "m_angAbsRotation", ang);
-	TeleportEntity(prop, pos, ang);
-
-	SetVariantString("!activator");
-	AcceptEntityInput(prop, "SetParent", viewmodel);
-
-	TeleportEntity(prop, {-2.00, 0.00, 0.00});
-
-	SetVariantString("Give");
-	AcceptEntityInput(prop, "SetAnimation");
-	SetEntPropFloat(prop, Prop_Send, "m_flPlaybackRate", 2.0);
-	SetEntPropEnt(prop, Prop_Send, "m_hOwnerEntity", client);
-
-	// Remove prop when animation ends
-	HookSingleEntityOutput(prop, "OnAnimationDone", AnimDone_Give, true);
-
-	SDKHook(prop, SDKHook_SetTransmit, FakeVMTransmit);
-
-	// Also remove after 5 seconds in case the above callback doesn't fire somehow
-	SetVariantString("OnUser1 !self:Kill::5:-1");
-	AcceptEntityInput(prop, "AddOutput");
-	AcceptEntityInput(prop, "FireUser1");
-}
-
-public Action FakeVMTransmit(int entity, int client)
-{
-	if (GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity") != client)
-		return Plugin_Handled;
-	return Plugin_Continue;
-}
-
-void AnimDone_Give(const char[] output, int caller, int activator, float delay) 
-{
-	int client = GetEntPropEnt(caller, Prop_Send, "m_hOwnerEntity");
-	RemoveEntity(caller);
-	SetEntProp(client, Prop_Send, "m_bDrawViewmodel", 1);
-}
-
-bool CanFitMedical(int client, MedicalID medID, int giver)
-{
-	// This is off by one on purpose, a full inventory gives a significant 
-	// movement penalty and we don't want players to be able to trigger this
-
-	if (GetMedicalWeight(medID) >= cvMaxInvCarry.IntValue - GetCarriedWeight(client))
-	{
-		PrintCenterText(giver, "%t", "Target Is Full", client);
-		return false;
-	}
-
-	if (FindMedical(client, medID) != -1)
-	{
-		PrintCenterText(giver, "%t", "Target Already Owns", client, medPhrases[medID], giver);
-		return false;
-	}
-
-	return true;
-}
-
-int GetMedicalWeight(MedicalID medID)
-{
-	// TODO: Read from config to allow for custom medical weights, or sdkcall GetWeight?
-	static int MEDICAL_WEIGHTS[] = {85, 35, 35, 35};
-	return MEDICAL_WEIGHTS[medID];
 }
 
 int GetClientUseTarget(int client, float range)
@@ -807,10 +694,28 @@ int GetClientUseTarget(int client, float range)
 	GetClientEyePosition(client, hullStart);
 	ForwardVector(hullStart, hullAng, range, hullEnd);
 
-	TR_TraceHullFilter(hullStart, hullEnd, {-20.0,-20.0,-20.0 }, {20.0, 20.0, 20.00}, MASK_PLAYERSOLID, TR_OtherPlayers, client);
+	TR_TraceRayFilter(hullStart, hullEnd, CONTENTS_SOLID, RayType_EndPoint, TR_OtherPlayers, client);
 
-	int entity = TR_GetEntityIndex();
-	return (entity > 0) ? entity : -1;
+	bool didHit = TR_DidHit();
+	if (!didHit)
+	{
+		TR_TraceHullFilter(hullStart, hullEnd, 
+			view_as<float>({-20.0,-20.0,-20.0}), 
+			view_as<float>({20.0, 20.0, 20.00}), 
+			CONTENTS_SOLID, TR_OtherPlayers, client);
+		
+		didHit = TR_DidHit();
+	}
+
+	if (didHit)
+	{
+		int entity = TR_GetEntityIndex();
+		if (entity > 0)
+		{
+			return entity;
+		}
+	}
+	return -1;
 }
 
 bool TR_OtherPlayers(int entity, int mask, int client)
@@ -828,17 +733,17 @@ void ForwardVector(const float vPos[3], const float vAng[3], float fDistance, fl
 	vReturn[2] += vDir[2] * fDistance;
 }
 
-stock bool IsPlayerHurt(int client)
+bool IsPlayerHurt(int client)
 {
 	return GetClientHealth(client) < GetEntProp(client, Prop_Data, "m_iMaxHealth");
 }
 
-stock bool IsPlayerBleeding(int client)
+bool IsPlayerBleeding(int client)
 {
-	return !!GetEntProp(client, Prop_Send, "_bleedingOut");
+	return view_as<bool>(GetEntProp(client, Prop_Send, "_bleedingOut"));
 }
 
-stock void ShowProgressBar(int client, float duration, float prefill = 0.0)
+void ShowProgressBar(int client, float duration, float prefill = 0.0)
 {
 	BfWrite bf = UserMessageToBfWrite(StartMessageOne("ProgressBarShow", client));
 	bf.WriteFloat(duration);
@@ -846,37 +751,29 @@ stock void ShowProgressBar(int client, float duration, float prefill = 0.0)
 	EndMessage();
 }
 
-stock void HideProgressBar(int client)
+void HideProgressBar(int client)
 {
 	StartMessageOne("ProgressBarHide", client);
 	EndMessage();
 }
 
-stock void FreezePlayer(int client)
+void FreezePlayer(int client)
 {
 	int curFlags = GetEntProp(client, Prop_Send, "m_fFlags");
-	SetEntProp(client, Prop_Send, "m_fFlags", curFlags | 128);
+	SetEntProp(client, Prop_Send, "m_fFlags", curFlags | NMR_FL_ATCONTROLS);	
 }
 
-stock void UnfreezePlayer(int client)
+void UnfreezePlayer(int client)
 {
 	int curFlags = GetEntProp(client, Prop_Send, "m_fFlags");
-	SetEntProp(client, Prop_Send, "m_fFlags", curFlags & ~128);
+	SetEntProp(client, Prop_Send, "m_fFlags", curFlags & ~NMR_FL_ATCONTROLS);
 }
 
 void TryVoiceCommand(int client, VoiceCommand voice)
 {
-	static float lastVoiceTime[MAXPLAYERS_NMRIH+1];
-
-	static ConVar hVoiceCooldown;
-	if (!hVoiceCooldown)
-		hVoiceCooldown = FindConVar("sv_voice_cooldown");
-
-	float curTime = GetTickedTime();
-	if (curTime - hVoiceCooldown.FloatValue < lastVoiceTime[client])
+	if (!IsVoiceCommandTimerExpired(client))
 		return;
 
-	lastVoiceTime[client] = curTime;
 	float origin[3];
 	GetClientAbsOrigin(client, origin);
 
@@ -886,53 +783,35 @@ void TryVoiceCommand(int client, VoiceCommand voice)
 	TE_SendToAllInRange(origin, RangeType_Audibility);
 }
 
-void ApplyBandage(int client)
+bool IsVoiceCommandTimerExpired(int client)
+{
+	return RunEntVScriptBool(client, "IsVoiceCommandTimerExpired()");
+}
+
+void ApplyMedicalEffects(int client, MedicalID medID)
 {
 	SetEntProp(client, Prop_Send, "_bleedingOut", 0);
 
-	int newHealth = GetClientHealth(client) + bandageAmt.IntValue;
+	int newHealth = GetClientHealth(client) + healAmount[medID].IntValue;
 	int maxHealth = GetEntProp(client, Prop_Data, "m_iMaxHealth");
 	if (newHealth > maxHealth)
 		newHealth = maxHealth;
 
 	SetEntityHealth(client, newHealth);
-}
-
-void ApplyFirstAidKit(int client)
-{
-	SetEntProp(client, Prop_Send, "_bleedingOut", 0);
-
-	int newHealth = GetClientHealth(client) + medkitAmt.IntValue;
-	int maxHealth = GetEntProp(client, Prop_Data, "m_iMaxHealth");
-	if (newHealth > maxHealth)
-		newHealth = maxHealth;
-
-	SetEntityHealth(client, newHealth);
-}
-
-void DoFunctionForMedical(MedicalID medID, int& client)
-{
-	if (medID == Medical_Bandages)
-		ApplyBandage(client);
-	else if (medID == Medical_FirstAidKit)
-		ApplyFirstAidKit(client);
 }
 
 float GetMedicalDuration(MedicalID medID)
 {
 	if (medID == Medical_Invalid)
-	{
-		LogError("GetMedicalDuration called with invalid medical ID, returning dummy value");
-		return 5.0;
-	}
-
+		ThrowError("Invalid medical ID (%d)", medID);
+	
 	return cureTime[medID].FloatValue;
 }
 
 bool CanClientConsumeMedical(int client, MedicalID medID)
 {
-	return (medID == Medical_FirstAidKit && IsPlayerHurt(client)) ||
-		(medID == Medical_Bandages && IsPlayerBleeding(client));
+	return (medID == Medical_FirstAidKit && CanUseFirstAid(client)) ||
+		(medID == Medical_Bandages && CanUseBandages(client));
 }
 
 bool IsMedicalReady(int medical)
@@ -944,133 +823,130 @@ bool IsMedicalReady(int medical)
 	return sequence == SEQ_RUN || sequence == SEQ_IDLE || sequence == SEQ_WALKIDLE;
 }
 
-MedicalID GetMedicalID(int entity)
+bool CanUseFirstAid(int client)
 {
-	if (HasEntProp(entity, Prop_Send, "_applied"))
+	return IsPlayerBleeding(client) || IsPlayerHurt(client);
+}
+
+bool CanUseBandages(int client)
+{
+	return IsPlayerBleeding(client);
+}
+
+// Prevent players from wasting their own medical item after being healed by a teammate
+void StopHealAction(int client)
+{
+	int activeWeapon = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon");
+	if (activeWeapon == -1)
+		return;
+
+	MedicalID medID = GetMedicalID(activeWeapon);
+	if (medID != Medical_Bandages && medID != Medical_FirstAidKit)
+		return;
+
+	if (!CanClientConsumeMedical(client, medID))
+		ForceIdleWeapon(activeWeapon);
+}
+
+void ForceIdleWeapon(int weapon)
+{
+	float curTime =  GetGameTime();
+	SetEntPropFloat(weapon, Prop_Send, "m_flTimeWeaponIdle", curTime);
+	SetEntPropFloat(weapon, Prop_Send, "m_flNextPrimaryAttack", curTime);
+	SetEntPropFloat(weapon, Prop_Send, "m_flNextSecondaryAttack", curTime);	
+}
+
+MedicalID GetMedicalIDByClassname(const char[] classname)
+{
+	if (StrEqual(classname, "item_fi"))
+		return Medical_FirstAidKit;
+	else if (StrEqual(classname, "item_ba"))
+		return Medical_Bandages;
+
+	return Medical_Invalid;	
+}
+
+MedicalID GetMedicalID(int weapon)
+{
+	char classname[8];
+	GetEntityClassname(weapon, classname, sizeof(classname));
+	return GetMedicalIDByClassname(classname);
+}
+
+bool GetCookieBool(int client, Cookie cookie)
+{
+	char value[11];
+	cookie.Get(client, value, sizeof(value));
+
+	if (!value[0])
+		return false;
+	
+	// if it's not empty, it's true unless explicitly "0"
+	return !StrEqual(value, "0");
+}
+
+void SetCookieBool(int client, Cookie cookie, bool state)
+{
+	if (AreClientCookiesCached(client))
 	{
-		char classname[7];
-		GetEntityClassname(entity, classname, sizeof(classname));
-
-		switch (classname[5])
-		{
-			case 'f':
-				return Medical_FirstAidKit;
-			case 'b':
-				return Medical_Bandages;
-			case 'p':
-				return Medical_Pills;
-			case 'g':
-				return Medical_Gene;
-		}
+		char value[11];
+		FormatEx(value, sizeof(value), "%d", state);
+		cookie.Set(client, value);		
 	}
-
-	return Medical_Invalid;
-}
-
-bool ClientOptedOutHealing(int client)
-{
-	if (!AreClientCookiesCached(client))
-		return false; // assume not
-
-	char c[2];
-	optOutHealCookie.Get(client, c, sizeof(c));
-	return c[0] == '1';
-}
-
-bool ClientOptedOutSharing(int client)
-{
-	if (!AreClientCookiesCached(client))
-		return false; // assume not
-
-	char c[2];
-	optOutShareCookie.Get(client, c, sizeof(c));
-	return c[0] == '1';
-}
-
-
-int FindMedical(int client, MedicalID medID) 
-{
-	int maxWeapons = GetEntPropArraySize(client, Prop_Send, "m_hMyWeapons");
-	for (int i; i < maxWeapons; i++)
-	{
-		int weapon = GetEntPropEnt(client, Prop_Send, "m_hMyWeapons", i);
-		if (weapon != -1 && GetMedicalID(weapon) == medID)
-			return weapon;
-	}
-
-	return -1;
-}
-
-int GetCarriedWeight(int client)
-{
-	int weight;
-
-	// Ammo boxes weight 5g each, except for nades which weight 0 so we skip them
-	int maxAmmo = GetEntPropArraySize(client, Prop_Send, "m_iAmmo");
-	for (int i; i < AMMO_INDEX_GRENADE; i++)
-		weight += GetEntProp(client, Prop_Send, "m_iAmmo", _, i) * 5;
-
-	for (int i = AMMO_INDEX_TNT+1; i < maxAmmo; i++)
-		weight += GetEntProp(client, Prop_Send, "m_iAmmo", _, i) * 5;
-
-	// Weapons themselves also carry weight, so add that
-	weight += GetEntProp(client, Prop_Send, "_carriedWeight");
-	return weight;
 }
 
 bool AreZombiesNearby(int client)
 {
-	if (!canDoRadial)
+	if (!sphereQueryAvailable)
 		return false;
 
-	bool result;
+	GetClientAbsOrigin(client, _traceStartPos);
 
-	float clientPos[3];
-	GetClientEyePosition(client, clientPos);
-
-	ArrayStack results = new ArrayStack();
-	TR_EnumerateEntitiesSphere(clientPos, 90.0, MASK_SOLID, ZombiesNearby_Enumerator, results);
-
-	while (!results.Empty)
-	{
-		int zombie = results.Pop();
-
-		float zombiePos[3];
-		GetEntPropVector(zombie, Prop_Send, "m_vecOrigin", zombiePos);
-		zombiePos[2] += 40.0; // TODO: This is off for crawlers, do we care?
-
-		// Now check whether zombie is in direct sight of player (not behind wall, etc)
-		TR_TraceRayFilter(clientPos, zombiePos, MASK_SOLID_BRUSHONLY, RayType_EndPoint, TR_IgnoreLiving);
-		if (!TR_DidHit())
-		{
-			result = true;
-			break;
-		}
-	}
-	delete results;
-	return result;
+	_traceResult = false;
+	TR_EnumerateEntitiesSphere(_traceStartPos, ZOMBIE_SAFE_RADIUS, PARTITION_NON_STATIC_EDICTS, ZombiesNearby_Enumerator, client);
+	return _traceResult;
 }
 
-public bool TR_IgnoreLiving(int entity, int contentsMask)
+bool TR_IgnoreLiving(int entity, int contentsMask)
 {
 	return !IsEntityZombie(entity) && !IsEntityPlayer(entity);
-}
-
-bool ZombiesNearby_Enumerator(int entity, ArrayStack results)
-{
-	if (IsValidEntity(entity) && IsEntityZombie(entity))
-		results.Push(entity);
-	return true;
-}
-
-bool IsEntityZombie(int entity)
-{
-	return HasEntProp(entity, Prop_Send, "_headSplit");
 }
 
 bool IsEntityPlayer(int entity)
 {
 	return 0 < entity <= MaxClients;
+}
+
+bool ZombiesNearby_Enumerator(int entity, int client)
+{
+	if (entity != client && IsValidEntity(entity) && IsEntityZombie(entity))
+	{
+		// TODO: Test, buggy
+		// TR_ClipCurrentRayToEntity(MASK_ALL, entity);
+		// if (!TR_DidHit()){
+		// 	PrintToServer("hit nothing");
+		// 	return true;
+		// }
+
+		float zombiePos[3];
+		GetEntPropVector(entity, Prop_Send, "m_vecOrigin", zombiePos);
+
+		// Now check whether zombie is in direct sight of player (not behind wall, etc)
+		TR_TraceRayFilter(_traceStartPos, zombiePos, MASK_SOLID_BRUSHONLY, RayType_EndPoint, TR_IgnoreLiving);
+		if (!TR_DidHit())
+		{
+			_traceResult = true;
+			return false;
+		}
+	}
+	return true;
+}
+
+bool IsEntityZombie(int entity)
+{
+	char classname[11];
+	GetEntityClassname(entity, classname, sizeof(classname));
+	return (StrEqual(classname, "npc_nmrih_"));
 }
 
 // Exponential cooldown system

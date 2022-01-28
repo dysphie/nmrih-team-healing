@@ -25,16 +25,6 @@
 		"en"	"Allows other players to heal you"
 	}
 
-	"Cookie Item Sharing Name"
-	{
-		"en"	"Item Sharing"
-	}
-
-	"Cookie Item Sharing Description"
-	{
-		"en"	"Allows you and other players to share items with one another"
-	}
-
 	"Cookie Radius Check Name"
 	{
 		"en"	"Nearby Zombie Check"
@@ -42,7 +32,7 @@
 
 	"Cookie Radius Check Description"
 	{
-		"en"	"Prevents players from healing you when zombies are close"
+		"en"	"Prevents players from healing you when zombies are within this radius"
 	}
 
 	"Healing"
@@ -101,16 +91,6 @@
 	"Bandages"
 	{
 		"en"	"bandages"
-	}
-
-	"Pills"
-	{
-		"en"	"pills"
-	}
-
-	"Gene Therapy"
-	{
-		"en"	"a gene therapy"
 	}
 
 	"Can't Heal Cooldown"
