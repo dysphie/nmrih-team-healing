@@ -9,7 +9,7 @@ Allows survivors to heal each other
 - [Install Sourcemod](https://wiki.alliedmods.net/Installing_sourcemod) (1.11.0.6506 or higher is recommended for full functionality)
 - Grab the latest zip from the [releases](https://github.com/dysphie/nmrih-team-healing/releases) section.
 - Extract the contents into `addons/sourcemod`
-- Refresh the plugin list (`sm plugins refresh` in server console)
+- Refresh the plugin list (`sm plugins refresh` or `sm plugins load nmrih-team-healing` in server console)
 
 ## Usage
 
