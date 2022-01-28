@@ -22,7 +22,7 @@ public Plugin myinfo =
 	name        = "[NMRiH] Team Healing",
 	author      = "Dysphie",
 	description = "Allow use of first aid kits and bandages on teammates",
-	version     = "1.5.0",
+	version     = "1.5.1",
 	url         = ""
 };
 
@@ -217,7 +217,7 @@ enum struct HealingUse
 
 	void Succeed(int client, int target)
 	{
-		ApplyMedicalEffects(target, this.medID);
+		int givenHP = ApplyMedicalEffects(target, this.medID);
 
 		StopHealAction(target);
 		TryVoiceCommand(target, VoiceCommand_ThankYou); // A little courtesy goes a long way!
@@ -227,6 +227,7 @@ enum struct HealingUse
 		Call_PushCell(client);
 		Call_PushCell(EntRefToEntIndex(this.itemRef));
 		Call_PushCell(this.medID);
+		Call_PushCell(givenHP);
 		Call_Finish();
 
 		SDKHooks_DropWeapon(client, this.itemRef);
@@ -292,7 +293,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void OnPluginStart()
 {
-	healedFwd = new GlobalForward("OnClientTeamHealed", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
+	healedFwd = new GlobalForward("OnClientTeamHealed", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	beginHealFwd = new GlobalForward("OnClientBeginTeamHeal", ET_Event, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_CellByRef);
 
 	sphereQueryAvailable = GetFeatureStatus(FeatureType_Native, "TR_EnumerateEntitiesSphere") == FeatureStatus_Available;
@@ -788,16 +789,18 @@ bool IsVoiceCommandTimerExpired(int client)
 	return RunEntVScriptBool(client, "IsVoiceCommandTimerExpired()");
 }
 
-void ApplyMedicalEffects(int client, MedicalID medID)
+int ApplyMedicalEffects(int client, MedicalID medID)
 {
 	SetEntProp(client, Prop_Send, "_bleedingOut", 0);
 
-	int newHealth = GetClientHealth(client) + healAmount[medID].IntValue;
+	int curHealth = GetClientHealth(client);
+	int newHealth = curHealth + healAmount[medID].IntValue;
 	int maxHealth = GetEntProp(client, Prop_Data, "m_iMaxHealth");
 	if (newHealth > maxHealth)
 		newHealth = maxHealth;
 
 	SetEntityHealth(client, newHealth);
+	return newHealth - curHealth;
 }
 
 float GetMedicalDuration(MedicalID medID)

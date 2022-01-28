@@ -32,7 +32,7 @@
 
 	"Cookie Radius Check Description"
 	{
-		"en"	"Prevents players from healing you when zombies are within this radius"
+		"en"	"Prevents players from healing you when zombies are too close"
 	}
 
 	"Healing"
