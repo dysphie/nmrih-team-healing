@@ -58,5 +58,5 @@ Many actions are exposed to developers via global forwards, see [nmr_teamhealing
 
 ### Player blocks
 Allows players to block other people from healing them via `sm_settings`. This module is placed in `plugins/disabled` by default.
-Blocks are saved to the database specified by `sm_team_healing_block_database` cvar. This must match the name of an entry in `sourcemod/configs/databases.cfg`
+Blocks are saved to the database specified by the `sm_team_healing_block_database` convar. This must match the name of an entry in `sourcemod/configs/databases.cfg`
    
