@@ -28,10 +28,12 @@ Database blocksDB;
 public void OnPluginStart()
 {
 	LoadTranslations("team-healing-blocks.phrases");
-	cvDbName = CreateConVar("sm_team_healing_block_database", "default", "Database to store blocks");
+	cvDbName = CreateConVar("sm_team_heal_block_database", "default", "Database to store blocks");
 
 	CreateConVar("teamhealing_blocks_version", PLUGIN_VERSION, PLUGIN_DESCRIPTION,
 		FCVAR_SPONLY|FCVAR_NOTIFY|FCVAR_DONTRECORD);
+
+	AutoExecConfig(true, "plugin.team-healing-blocks");
 }
 
 public void OnConfigsExecuted()
@@ -169,7 +171,6 @@ public void OnLibraryAdded(const char[] name)
 {
 	if (!strcmp(name, "nmr_teamhealing"))
 	{
-		PrintToServer("LIBRARY ADDED BOYS");
 		TeamHealing_AddSetting("Manage Blocks", BlocksHandler, SettingAction_Display);
 	}
 }
@@ -237,9 +238,6 @@ void ToggleBlocked(int client, int target)
 {
 	blocked[client][target] = !blocked[client][target];
 	pendingSave[client][target] = !pendingSave[client][target];
-
-	PrintToServer("pendingSave[%d][%d] = %d", client, target, pendingSave[client][target]);
-
 	TryStoreBlockInDB(client, target);
 }
 
@@ -254,7 +252,6 @@ void TryStoreBlockInDB(int client, int target)
 
 	if (cooldown > 0)
 	{
-		PrintToServer("Wait...");
 		if (!syncTimer[client])
 		{
 			syncTimer[client] = CreateTimer(cooldown, 
@@ -263,7 +260,6 @@ void TryStoreBlockInDB(int client, int target)
 	}
 	else 
 	{
-		PrintToServer("Save instantly");
 		StoreBlockInDB(client, target);
 	}
 }
@@ -283,13 +279,12 @@ void StoreBlockInDB(int client, int target)
 	
 	blocksDB.Query(OnBlockStoredInDB, query);
 	pendingSave[client][target] = false;
-	PrintToServer("pendingSave[%d][%d] = 0", client, target);
 	nextQueryTime = GetEngineTime() + 5.0;
 }
 
 void OnBlockStoredInDB(Database db, DBResultSet results, const char[] error, any data)
 {
-	PrintToServer("OnBlockStoredInDB");
+	
 }
 
 public void OnClientDisconnect(int client)
@@ -317,13 +312,10 @@ public void OnClientDisconnect(int client)
 				txn = new Transaction();
 			}
 
-			PrintToServer("%N pending block on %N. Save", client, other);
-
 			char query[512];
 			BuildDbQuery(clientId, otherId, blocked[client][other], query, sizeof(query));
 			txn.AddQuery(query);
 			pendingSave[client][other] = false;
-			PrintToServer("pendingSave[%d][%d] = 0;", client, other);
 		}
 
 		if (pendingSave[other][client])
@@ -332,12 +324,10 @@ public void OnClientDisconnect(int client)
 				txn = new Transaction();
 			}
 
-			PrintToServer("%N pending blocked by %N. Save", other, client);
 			char query[512];
 			BuildDbQuery(otherId, clientId, blocked[other][client], query, sizeof(query));
 			txn.AddQuery(query);	
 			pendingSave[other][client] = false;
-			PrintToServer("pendingSave[%d][%d] = 0;", other, client);
 		}
 	}
 
@@ -351,8 +341,6 @@ public void OnClientDisconnect(int client)
 
 public void OnClientConnected(int client)
 {
-	PrintToServer("Clear player %N", client);
-
 	for (int i = 1; i <= MaxClients; i++)
 	{
 		for (int j = 1; j <= MaxClients; j++)
@@ -384,12 +372,11 @@ void OnDatabaseSetupSuccess(Database db, DBResultSet results, const char[] error
 
 void OnTransactionSuccess(Database db, any data, int numQueries, DBResultSet[] results, any[] queryData)
 {
-	PrintToServer("Success");
 }
 
 void OnTransactionError(Database db, any data, int numQueries, const char[] error, int failIndex, any[] queryData)
 {
-	PrintToServer("Error %s", error);
+	LogError("Error saving player blocks: %s", error);
 }
 
 
@@ -400,14 +387,12 @@ void BuildDbQuery(int clientId, int targetId, bool isBlocked, char[] query, int 
 		blocksDB.Format(query, maxlen,
 			"DELETE FROM `teamhealing_blocks` WHERE `client_id` = %d AND `target_id` = %d",
 			clientId, targetId);
-		PrintToServer("%s", query);
 	}
 	else
 	{
 		blocksDB.Format(query, maxlen,
 			"INSERT IGNORE INTO `teamhealing_blocks`(`client_id`, `target_id`) VALUES (%d, %d)", 
 			clientId, targetId);
-		PrintToServer("%s", query);
 	}
 }
 
@@ -448,7 +433,6 @@ Action Timer_StorePendingBlocksInDB(Handle timer, int serial)
 		BuildDbQuery(clientId, targetId, blocked[client][target], query, sizeof(query));
 		txn.AddQuery(query);
 		pendingSave[client][target] = false;
-		PrintToServer("pendingSave[%d][%d] = 0", client, target);
 	}
 
 	if (txn) 
@@ -474,11 +458,8 @@ void FetchBlocksForClient(int client)
 
 	char clientId = GetSteamAccountID(client);
 	if (!clientId) {
-		PrintToServer("No steam account for %N", client);
 		return;
 	}
-
-	PrintToServer("Fetching existing blocks for %N", client);
 
 	int numOtherIds;
 	char otherIds[255];
@@ -515,7 +496,6 @@ void FetchBlocksForClient(int client)
 			"OR (`target_id` = %d AND `client_id` IN (%s))", 
 		clientId, otherIds, clientId, otherIds);
 
-	PrintToServer(query);
 	blocksDB.Query(OnPostAuthQuery, query, GetClientSerial(client));
 }
 
@@ -536,28 +516,22 @@ void OnPostAuthQuery(Database db, DBResultSet results, const char[] error, int s
 		return;
 	}
 
-	PrintToServer("Got %d results", results.RowCount);
-
 	while (results.FetchRow())
 	{
 		int blockerId = results.FetchInt(0);
 		int targetId = results.FetchInt(1);
 
-		PrintToServer("FetchRow: %d blocked %d", blockerId, targetId);
 
 		int blocker = FindClientByAccountID(blockerId);
 		if (blocker == -1) {
-			PrintToServer("blockerId %d didnt return results ", blockerId);
 			continue;
 		}
 
 		int target = FindClientByAccountID(targetId);
 		if (target == -1) {
-			PrintToServer("blockedId %d didnt return results ", targetId);
 			continue;
 		}
 
-		PrintToServer("DbToCache: Make %N block %N", blocker, target);
 		blocked[blocker][target] = true;
 		pendingSave[blocker][target] = false;
 	}

@@ -1,0 +1,18 @@
+"Phrases"
+{
+	"Manage Blocks"
+	{
+		"en"	"Manage Blocks"
+	}
+
+	"Blocked"
+	{
+		"en"	"BLOCKED"
+	}
+
+	"Target Blocked You"
+	{
+		"#format" "{1:N}"
+		"en"	"{1} has blocked you"
+	}
+}
