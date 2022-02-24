@@ -17,21 +17,21 @@
 
 #define NMR_FL_ATCONTROLS 128
 
+#define PLUGIN_DESCRIPTION "Allows survivors to heal each other via +use"
+#define PLUGIN_VERSION "1.5.2"
+
 public Plugin myinfo = 
-{	
-	name        = "[NMRiH] Team Healing",
+{
+	name        = "Team Healing",
 	author      = "Dysphie",
-	description = "Allow use of first aid kits and bandages on teammates",
-	version     = "1.5.1",
-	url         = ""
+	description = PLUGIN_DESCRIPTION,
+	version     = PLUGIN_VERSION,
+	url         = "https://github.com/dysphie/nmrih-team-healing"
 };
 
 
 bool healDisabled[MAXPLAYERS_NMRIH+1];
 bool ignoreRadiusCheck[MAXPLAYERS_NMRIH+1];
-
-char menuItemSound[PLATFORM_MAX_PATH];
-char menuExitSound[PLATFORM_MAX_PATH];
 
 bool sphereQueryAvailable;
 Cookie healCookie, radiusCookie;
@@ -53,14 +53,6 @@ float _traceStartPos[3];
 bool _traceResult;
 
 ArrayList sfx[2];
-
-enum
-{	
-	COOKIEMENU_HEAL_TOGGLE = 1,
-	COOKIEMENU_RADIUS_TOGGLE,
-	COOKIEMENU_BACK = 8,
-	COOKIEMENU_EXIT = 10,
-}
 
 enum HealRequestResult
 {
@@ -283,20 +275,38 @@ enum struct HealingUse
 
 }
 
+/* A menu created by a teamhealing module */
+enum struct AddonSettings
+{
+	int id;
+	char title[255];
+	PrivateForward fwd;	// Callback living in another plugin
+	SettingAction actions;	// Additional actions to pass to the handler
+	Handle plugin;	// Handle to the plugin that added this menu
+}
+
+ArrayList modEntries;
 HealingUse healing[MAXPLAYERS_NMRIH+1];
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
+	modEntries = new ArrayList(sizeof(AddonSettings));
+	RegPluginLibrary("nmr_teamhealing");
 	MarkNativeAsOptional("TR_EnumerateEntitiesSphere");
+	CreateNative("TeamHealing_AddSetting", Native_AddSettingsMenu);
+	CreateNative("TeamHealing_ShowSettings", Native_ShowSettings);
 	return APLRes_Success;
 }
 
 public void OnPluginStart()
 {
-	healedFwd = new GlobalForward("OnClientTeamHealed", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
-	beginHealFwd = new GlobalForward("OnClientBeginTeamHeal", ET_Event, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_CellByRef);
+	healedFwd = new GlobalForward("OnClientTeamHealed", 
+		ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
+	beginHealFwd = new GlobalForward("OnClientBeginTeamHeal", 
+		ET_Event, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_CellByRef);
 
-	sphereQueryAvailable = GetFeatureStatus(FeatureType_Native, "TR_EnumerateEntitiesSphere") == FeatureStatus_Available;
+	sphereQueryAvailable = GetFeatureStatus(FeatureType_Native, 
+		"TR_EnumerateEntitiesSphere") == FeatureStatus_Available;
 
 	LoadTranslations("core.phrases"); // used for cookie messages
 	LoadTranslations("team-healing.phrases");
@@ -310,6 +320,9 @@ public void OnPluginStart()
 					"Seconds it takes for bandages to heal a teammate");
 
 	cvUseDistance = FindConVar("sv_use_max_reach");
+
+	CreateConVar("teamhealing_version", PLUGIN_VERSION, PLUGIN_DESCRIPTION,
+    	FCVAR_SPONLY|FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
 	healAmount[Medical_FirstAidKit] = FindConVar("sv_first_aid_heal_amt");
 	healAmount[Medical_Bandages] = FindConVar("sv_bandage_heal_amt");
@@ -327,18 +340,8 @@ public void OnPluginStart()
 
 	SetCookieMenuItem(EntryCookieMenu, 0, "Team Healing");
 
-	// Sounds used by cookie menu
-	char path[PLATFORM_MAX_PATH];
-	BuildPath(Path_SM, path, sizeof(path), "configs/core.cfg");
-	SMCParser parser = new SMCParser();
-	parser.OnKeyValue = OnKeyValue;
-	parser.ParseFile(path);
-	delete parser;
-
 	RegAdminCmd("teamhealing_reload_sounds", Cmd_ReloadMedicalSounds, ADMFLAG_GENERIC);
 }
-
-
 
 Action Cmd_ReloadMedicalSounds(int client, int args)
 {
@@ -422,16 +425,6 @@ void SaveHealSounds(KeyValues kv, const char[] key, ArrayList arr)
 	kv.GoBack();
 }
 
-SMCResult OnKeyValue(SMCParser smc, const char[] key, const char[] value, bool key_quotes, bool value_quotes)
-{
-	if (!strcmp(key, "MenuItemSound"))
-		strcopy(menuItemSound, sizeof(menuItemSound), value);
-	else if (!strcmp(key, "MenuExitSound"))
-		strcopy(menuExitSound, sizeof(menuExitSound), value);
-
-	return SMCParse_Continue;
-}
-
 void EntryCookieMenu(int client, CookieMenuAction action, any info, char[] buffer, int maxlen)
 {
 	if (action == CookieMenuAction_DisplayOption)
@@ -441,7 +434,7 @@ void EntryCookieMenu(int client, CookieMenuAction action, any info, char[] buffe
 
 	else if (action == CookieMenuAction_SelectOption)
 	{
-		ShowToggleMenu(client);
+		ShowTeamHealingMenu(client);
 	}
 }
 
@@ -451,81 +444,173 @@ public void OnClientCookiesCached(int client)
 	ignoreRadiusCheck[client] = GetCookieBool(client, radiusCookie);
 }
 
-void ShowToggleMenu(int client)
+public int Native_ShowSettings(Handle plugin, int numParams)
 {
-	Panel panel = new Panel();
+	int client = GetNativeCell(1);
+	if (0 >= client > MaxClients)
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index %d", client);
+	
+	if (!IsClientInGame(client))
+		return ThrowNativeError(SP_ERROR_NATIVE, "Client %d is not in game", client);
+
+	ShowTeamHealingMenu(client);
+
+	return 0;
+}
+
+public int Native_AddSettingsMenu(Handle plugin, int numParams)
+{
+	static int id = 0;
+
+	AddonSettings entry;
+	entry.id = id++;
+	
+	Function handler = GetNativeFunction(2);
+
+	if (handler == INVALID_FUNCTION) {
+		ThrowNativeError(SP_ERROR_NATIVE, "Invalid handler");
+	}
+
+	entry.fwd = new PrivateForward(ET_Event, Param_Cell, Param_Cell, Param_String, Param_Cell);
+	entry.fwd.AddFunction(plugin, handler);
+
+	GetNativeString(1, entry.title, sizeof(entry.title));
+	entry.plugin = plugin;
+
+	entry.actions = GetNativeCell(3);
+
+	modEntries.PushArray(entry);
+
+	return 0;
+}
+
+void ShowTeamHealingMenu(int client)
+{
+	Menu menu = new Menu(MainMenuHandler, MenuAction_DisplayItem);
 
 	char buffer[2048];
 	FormatEx(buffer, sizeof(buffer), "%T", "Cookie Menu Title", client);
-	panel.SetTitle(buffer);
-
-	panel.DrawText(" ");
+	menu.SetTitle(buffer);
 
 	// Team healing cookie
 	FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Team Healing Name", client, 
 		healDisabled[client] ? "Cookie Disabled" : "Cookie Enabled", client);
-	panel.DrawItem(buffer);
-	FormatEx(buffer, sizeof(buffer), "%T", "Cookie Team Healing Description", client);
-	panel.DrawText(buffer);
-
-	panel.DrawText(" ");
+	menu.AddItem("toggle", buffer);
 
 	// Zombie check cookie
 	if (sphereQueryAvailable)
 	{
 		FormatEx(buffer, sizeof(buffer), "%T: %T", "Cookie Radius Check Name", client, 
 			ignoreRadiusCheck[client] ? "Cookie Disabled" : "Cookie Enabled", client);
-		panel.DrawItem(buffer);	
-		FormatEx(buffer, sizeof(buffer), "%T", "Cookie Radius Check Description", client);
-		panel.DrawText(buffer);
-
-		panel.DrawText(" ");
+		menu.AddItem("zcheck", buffer);	
 	}
 
-	panel.CurrentKey = 8;
-	FormatEx(buffer, sizeof(buffer), "%T", "Back", client);
-	panel.DrawItem(buffer);
+	// Add any module settings
+	int maxModEntries = modEntries.Length; 
+	for (int i = maxModEntries -1; i >= 0; i--)
+	{
+		AddonSettings entry;
+		modEntries.GetArray(i, entry);
 
-	panel.DrawText(" ");
+		char key[32];
+		Format(key, sizeof(key), "mod_%d", entry.id);
+		menu.AddItem(key, entry.title);
+	}
 
-	panel.CurrentKey = 10;
-	FormatEx(buffer, sizeof(buffer), "%T", "Exit", client);
-	panel.DrawItem(buffer);
-
-	panel.Send(client, CookieTogglePanel, MENU_TIME_FOREVER);
-	delete panel;
+	menu.Display(client, MENU_TIME_FOREVER);
 }
 
-int CookieTogglePanel(Menu menu, MenuAction action, int param1, int param2)
+public void OnNotifyPluginUnloaded(Handle plugin)
 {
+	int idx = modEntries.FindValue(plugin, AddonSettings::plugin);
+	if (idx != -1) 
+	{
+		AddonSettings entry;
+		modEntries.GetArray(idx, entry);
+		delete entry.fwd;
+		modEntries.Erase(idx);
+	}
+}
+
+int MainMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+	if (action == MenuAction_End)
+	{
+		delete menu;
+		return 0;
+	}
+
 	if (action == MenuAction_Select)
 	{
-		switch (param2)
+		char info[32], display[255];
+		menu.GetItem(param2, info, sizeof(info), _, display, sizeof(display));
+
+		if (!strcmp(info, "toggle"))
 		{
-			case COOKIEMENU_HEAL_TOGGLE:
-			{
-				healDisabled[param1] = !healDisabled[param1];
-				SetCookieBool(param1, healCookie, healDisabled[param1]);
-				ShowToggleMenu(param1);	
-			}
-			case COOKIEMENU_RADIUS_TOGGLE:
-			{
-				ignoreRadiusCheck[param1] = !ignoreRadiusCheck[param1];
-				SetCookieBool(param1, radiusCookie, ignoreRadiusCheck[param1]);
-				ShowToggleMenu(param1);
-			}
-			case COOKIEMENU_BACK:
-			{
-				ShowCookieMenu(param1);
-			}
-			case COOKIEMENU_EXIT:
-			{
-				EmitSoundToClient(param1, menuExitSound);
-				return 0;
-			}
+			healDisabled[param1] = !healDisabled[param1];
+			SetCookieBool(param1, healCookie, healDisabled[param1]);
+			ShowTeamHealingMenu(param1);	
 		}
 
-		EmitSoundToClient(param1, menuItemSound);
+		else if (!strcmp(info, "zcheck"))
+		{
+			ignoreRadiusCheck[param1] = !ignoreRadiusCheck[param1];
+			SetCookieBool(param1, radiusCookie, ignoreRadiusCheck[param1]);
+			ShowTeamHealingMenu(param1);	
+		}
+
+		// Check if we selected a mod entry
+		else if (!strncmp(info, "mod_", 4))
+		{
+			int id = StringToInt(info[4]);
+			int idx = modEntries.FindValue(id, AddonSettings::id);
+			if (idx == -1) 
+			{
+				ShowTeamHealingMenu(param1);
+				return 0;
+			}
+
+			AddonSettings entry;
+			modEntries.GetArray(idx, entry);
+
+			Call_StartForward(entry.fwd);
+			Call_PushCell(param1);
+			Call_PushCell(SettingAction_Select);
+			Call_PushStringEx(display, sizeof(display), SM_PARAM_STRING_UTF8|SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+			Call_PushCell(sizeof(display));
+			Call_Finish();
+		}
+	}
+
+	else if (action == MenuAction_DisplayItem)
+	{
+		char info[32], display[255];
+		menu.GetItem(param2, info, sizeof(info), _, display, sizeof(display));
+
+		// Check if we selected a mod entry
+		if (!strncmp(info, "mod_", 4))
+		{
+			int id = StringToInt(info[4]);
+			int idx = modEntries.FindValue(id, AddonSettings::id);
+			if (idx == -1) {
+				return 0;
+			}
+
+			AddonSettings entry;
+			modEntries.GetArray(idx, entry);
+
+			if ((entry.actions & SettingAction_Display)) 
+			{
+				Call_StartForward(entry.fwd);
+				Call_PushCell(param1);
+				Call_PushCell(SettingAction_Display);
+				Call_PushStringEx(display, sizeof(display), SM_PARAM_STRING_UTF8|SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+				Call_PushCell(sizeof(display));
+				Call_Finish();
+
+				return RedrawMenuItem(display);
+			}
+		}
 	}
 
 	return 0;
@@ -534,8 +619,6 @@ int CookieTogglePanel(Menu menu, MenuAction action, int param1, int param2)
 public void OnMapStart()
 {
 	PrecacheMedicalSounds();
-	PrecacheSound(menuExitSound);
-	PrecacheSound(menuItemSound);
 }
 
 void PrecacheMedicalSounds()
@@ -924,10 +1007,9 @@ bool ZombiesNearby_Enumerator(int entity, int client)
 {
 	if (entity != client && IsValidEntity(entity) && IsEntityZombie(entity))
 	{
-		// TODO: Test, buggy
+		// FIXME: Buggy!
 		// TR_ClipCurrentRayToEntity(MASK_ALL, entity);
 		// if (!TR_DidHit()){
-		// 	PrintToServer("hit nothing");
 		// 	return true;
 		// }
 
