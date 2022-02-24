@@ -1,0 +1,112 @@
+"Phrases"
+{
+	"Cookie Menu Title"
+	{
+		"ru"	"Медицинские настройки"
+	}	
+
+	"Cookie Disabled"
+	{
+		"ru"	"ОТКЛЮЧЕНО"
+	}
+
+	"Cookie Enabled"
+	{
+		"ru"	"ВКЛЮЧЕНО"
+	}
+
+	"Cookie Team Healing Name"
+	{
+		"ru"	"Командное лечение"
+	}
+
+	"Cookie Team Healing Description"
+	{
+		"ru"	"Позволяет другим игрокам лечить вас"
+	}
+
+	"Cookie Radius Check Name"
+	{
+		"ru"	"Проверка зомби поблизости"
+	}
+
+	"Cookie Radius Check Description"
+	{
+		"ru"	"Не позволяет игрокам лечить вас, когда зомби находятся слишком близко"
+	}
+
+	"Healing"
+	{
+		"ru"		"Лечение {1}"
+	}
+
+	"Being Healed"
+	{
+		"ru"		"Вас лечит {1}.\nПригнитесь для отмены"
+	}
+
+	"Cooldown"
+	{
+		"ru"		"Перезарядка, повторите попытку через {1} сек."
+	}
+
+	"Received Item"
+	{
+		"ru"	"{1} дал вам {2}"
+	}
+
+	"Gave Item"
+	{
+		"ru"	"Вы дали {1} {2}"
+	}
+
+	"Target Already Owns"
+	{
+		"ru"	"{1} уже имеет {2}"
+	}
+
+	"Target Is Full"
+	{
+		"ru"	"Инвентарь {1} полон"
+	}
+
+	"Target Opted Out"
+	{
+		"ru"	"{1} отключил эту возможность"
+	}
+
+	"First Aid Kit"
+	{
+		"ru"	"аптечку"
+	}
+
+	"Bandages"
+	{
+		"ru"	"бинты"
+	}
+
+	"Can't Heal Cooldown"
+	{
+		"ru"		"Перезарядка, повторите попытку через {1}с"
+	}
+
+	"Can't Heal Healthy"
+	{
+		"ru"		"{1} здоров"
+	}
+
+	"Can't Heal Zombies Nearby"
+	{
+		"ru"		"Невозможно лечиться, когда рядом находятся зомби"
+	}
+
+	"Cookies Not Available"
+	{
+		"ru"	"Ваши настройки в данный момент недоступны"
+	}
+
+	"Healing Rejected"
+	{
+		"ru"		"{1} отказался от лечения"
+	}
+}
